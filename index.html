@@ -52,7 +52,7 @@
         <input type="file" id="file-in" accept=".csv,.txt,.dat">
         <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
         <div class="dz-main">Drop file or click to upload</div>
-        <div class="dz-hint">.csv &middot; .txt &middot; .dat &nbsp;|&nbsp; seconds or ms — auto-detected</div>
+        <div class="dz-hint">.txt &nbsp;|&nbsp; seconds or ms — auto-detected</div>
       </label>
       <div class="data-chip" id="data-chip"><span class="chip-dot"></span><span id="data-chip-text">No data loaded</span></div>
       <button class="btn btn-ghost" id="btn-example">
@@ -180,12 +180,12 @@
           <canvas id="chart-rr" height="130"></canvas>
         </div>
         <div class="cc">
-          <div class="cc-lbl">Empirical vs Reconstructed Power Spectral Density</div>
-          <canvas id="chart-psd" height="148"></canvas>
-        </div>
-        <div class="cc" style="margin-top:12px">
           <div class="cc-lbl">Morlet CWT — Time-Frequency Power Scalogram (log-frequency, inferno scale)</div>
           <canvas id="chart-cwt" style="display:block;width:100%"></canvas>
+        </div>
+        <div class="cc" style="margin-top:12px">
+          <div class="cc-lbl">Empirical vs Reconstructed Power Spectral Density</div>
+          <canvas id="chart-psd" height="130"></canvas>
         </div>
       </div>
 

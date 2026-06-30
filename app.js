@@ -129,7 +129,7 @@ function morletGWS(signal, dt) {
 //      Returns power[si][t] (Float32Array per scale row)
 // ═══════════════════════════════════════════════════════════
 function morletCWTScalogram(signal, dt) {
-  const omega0=6, N=signal.length, Np=pow2(N);
+  const omega0=12, N=signal.length, Np=pow2(N);
   const sRe=new Float64Array(Np), sIm=new Float64Array(Np);
   for(let i=0;i<N;i++) sRe[i]=signal[i];
   fftCore(sRe,sIm,false);
@@ -945,13 +945,13 @@ function _renderCWT(){
 
   // Layout constants
   const PAD={top:12,bottom:40,left:50,right:56}; // right leaves room for colorbar
-  const H=224;
+  const H=350;
   canvas.width=W; canvas.height=H;
   const ctx=canvas.getContext('2d');
   const pW=W-PAD.left-PAD.right, pH=H-PAD.top-PAD.bottom;
 
   // Background
-  ctx.fillStyle=isLight?'#FFFFFF':'#07090F';
+  ctx.fillStyle=isLight?'#FFFFFF':'#0B1120';
   ctx.fillRect(0,0,W,H);
 
   // ── Scalogram via ImageData (bilinear + log-power + inferno colormap) ──
