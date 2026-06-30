@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>SPARK – Stochastic Phase-Domain Autonomic Reconstruction Kinetics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="styles.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ══ APP ROOT ══ -->
+<!-- Shared floating info tooltip (positioned by JS) -->
+<div id="info-tip" role="tooltip" aria-live="polite">
+  <div class="tip-title"></div>
+  <div class="tip-formula"></div>
+  <div class="tip-body"></div>
+</div>
+<div id="app">
+
+<!-- TOPBAR -->
+<header class="topbar">
+  <div class="tb-brand">
+    <span class="spark-tag">SPARK</span>
+    <div>
+      <div class="spark-title">Stochastic Phase-Domain Autonomic Reconstruction Kinetics</div>
+      <div class="spark-sub">Dual-filter GLS Kalman &middot; Morlet CWT anchoring &middot; MAP estimation &middot; Client-side</div>
+    </div>
+  </div>
+  <div class="tb-right">
+    <span class="ver-badge">v2.0</span>
+    <button class="icon-btn" id="theme-btn" title="Toggle light/dark mode">
+      <svg id="ico-sun" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="display:none"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      <svg id="ico-moon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+  </div>
+</header>
+
+<!-- WORKSPACE -->
+<div class="workspace">
+
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar">
+
+    <!-- Data Input -->
+    <div class="panel">
+      <span class="plabel-static">Data Input</span>
+      <label class="drop-zone" id="drop-zone" for="file-in">
+        <input type="file" id="file-in" accept=".csv,.txt,.dat">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+        <div class="dz-main">Drop file or click to upload</div>
+        <div class="dz-hint">.csv &middot; .txt &middot; .dat &nbsp;|&nbsp; seconds or ms — auto-detected</div>
+      </label>
+      <div class="data-chip" id="data-chip"><span class="chip-dot"></span><span id="data-chip-text">No data loaded</span></div>
+      <button class="btn btn-ghost" id="btn-example">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 3l14 9-14 9V3z"/></svg>
+        Load example data (400 beats)
+      </button>
+    </div>
+
+    <!-- Analysis -->
+    <div class="panel">
+      <span class="plabel-static">Analysis</span>
+      <button class="btn btn-primary" id="btn-run" disabled>
+        <svg width="11" height="11" fill="currentColor" viewBox="0 0 16 16"><path d="M3 2.5l10 5.5-10 5.5V2.5z"/></svg>
+        Run Analysis
+      </button>
+      <div id="prog-outer" style="display:none">
+        <div class="prog-wrap">
+          <div class="prog-track"><div class="prog-fill" id="prog-fill"></div></div>
+          <div class="prog-msg" id="prog-text">—</div>
+        </div>
+      </div>
+      <div id="alert-ok"  class="alert ok"></div>
+      <div id="alert-err" class="alert err"></div>
+    </div>
+
+    <!-- Hyperparameters (collapsible) -->
+    <div class="panel">
+      <div class="panel-hdr closed" id="hdr-opts">
+        <span class="plabel">Hyperparameters</span>
+        <span class="parrow closed" id="arr-opts">▾</span>
+      </div>
+      <div class="pbody hidden" id="body-opts">
+        <div class="ctrl-grp">
+          <div class="ctrl-hdr"><span class="ctrl-key">θ_jump</span><span class="ctrl-num" id="v-jthr">0.10</span></div>
+          <input type="range" id="sl-jthr" min="0.04" max="0.30" step="0.01" value="0.10">
+          <div class="ctrl-hint">Fractional jump gate threshold (default: 0.10)</div>
+        </div>
+        <div class="ctrl-grp">
+          <div class="ctrl-hdr"><span class="ctrl-key">p_jump</span><span class="ctrl-num" id="v-jpow">10</span></div>
+          <input type="range" id="sl-jpow" min="2" max="20" step="1" value="10">
+          <div class="ctrl-hint">Null-gain gate steepness (default: 10)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Simulation Playground (collapsible) -->
+    <div class="panel">
+      <div class="panel-hdr closed" id="hdr-sim">
+        <span class="plabel">Simulation Playground</span>
+        <span class="parrow closed" id="arr-sim">▾</span>
+      </div>
+      <div class="pbody hidden" id="body-sim">
+        <div class="ctrl-grp">
+          <div class="ctrl-hdr"><span class="ctrl-key">ν₀</span><span class="ctrl-num" id="v-nu0">63 bpm</span></div>
+          <input type="range" id="sl-nu0" min="0.80" max="1.80" step="0.01" value="1.05">
+        </div>
+        <div class="ctrl-grp">
+          <div class="ctrl-hdr"><span class="ctrl-key">κ_S</span><span class="ctrl-num" id="v-ks">0.070 Hz</span></div>
+          <input type="range" id="sl-ks" min="0.01" max="0.50" step="0.01" value="0.07">
+        </div>
+        <div class="ctrl-grp">
+          <div class="ctrl-hdr"><span class="ctrl-key">κ_P</span><span class="ctrl-num" id="v-kp">1.100 Hz</span></div>
+          <input type="range" id="sl-kp" min="0.20" max="3.00" step="0.05" value="1.10">
+          <div class="ctrl-hint">Must be &gt; κ_S</div>
+        </div>
+        <div class="ctrl-grp">
+          <div class="ctrl-hdr"><span class="ctrl-key">N beats</span><span class="ctrl-num" id="v-nb">400</span></div>
+          <input type="range" id="sl-nb" min="100" max="800" step="50" value="400">
+        </div>
+        <button class="btn btn-ghost" id="btn-sim" style="margin-bottom:8px">
+          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-4.49"/></svg>
+          Simulate &amp; Analyze
+        </button>
+        <div id="sim-result" style="display:none">
+          <div class="sec" style="margin-top:4px;font-size:.59rem">Parameter Recovery</div>
+          <table class="sim-table" id="sim-table">
+            <thead><tr><th>Param</th><th>True</th><th>Estimated</th><th>Δ%</th></tr></thead>
+            <tbody id="sim-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ── CONTENT ── -->
+  <main class="content">
+
+    <!-- Empty state -->
+    <div class="empty" id="empty-state">
+      <div class="empty-ico">
+        <svg width="52" height="52" fill="none" stroke="currentColor" stroke-width=".9" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      </div>
+      <div class="empty-h">Load an RR interval sequence to begin</div>
+      <div class="empty-p">Upload a plain-text file with one RR interval per line (in seconds, 0.1–3.0 s), or explore the model using the built-in 400-beat synthetic dataset.</div>
+    </div>
+
+    <!-- Results (hidden until run) -->
+    <div id="results-wrap" style="display:none">
+
+      <nav class="tab-nav">
+        <button class="tab-btn active" data-tab="overview">Overview</button>
+        <button class="tab-btn" data-tab="signal">Signal</button>
+        <button class="tab-btn" data-tab="autonomic">Autonomic</button>
+        <button class="tab-btn" data-tab="diagnostics">Diagnostics</button>
+      </nav>
+
+      <!-- TAB: Overview -->
+      <div id="tab-overview" class="tab-panel active">
+        <div class="sec">Key Estimates</div>
+        <div class="metric-grid" id="metric-grid"></div>
+        <div class="sec" style="margin-top:4px">Full Parameter Report — SDE-IPFM Phase-Domain Model</div>
+        <div class="pcard">
+          <table class="ptable" id="param-table">
+            <thead><tr><th>Parameter</th><th>Group</th><th>Estimate</th><th>Interpretation</th><th>Status</th></tr></thead>
+            <tbody id="param-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TAB: Signal -->
+      <div id="tab-signal" class="tab-panel">
+        <div class="cc mb">
+          <div class="cc-lbl">RR Interval — Phase-Domain Reconstruction with 95% Credible Interval</div>
+          <canvas id="chart-rr" height="130"></canvas>
+        </div>
+        <div class="cc">
+          <div class="cc-lbl">Empirical vs Reconstructed Power Spectral Density</div>
+          <canvas id="chart-psd" height="148"></canvas>
+        </div>
+        <div class="cc" style="margin-top:12px">
+          <div class="cc-lbl">Morlet CWT — Time-Frequency Power Scalogram (log-frequency, inferno scale)</div>
+          <canvas id="chart-cwt" style="display:block;width:100%"></canvas>
+        </div>
+      </div>
+
+      <!-- TAB: Autonomic -->
+      <div id="tab-autonomic" class="tab-panel">
+        <div class="cc mb">
+          <div class="cc-lbl">Native Autonomic Drivers — Parasympathetic &amp; Sympathetic (95% CI)</div>
+          <canvas id="chart-states" height="118"></canvas>
+        </div>
+        <div class="g2">
+          <div class="cc" style="min-height:300px;display:flex;flex-direction:column">
+            <div class="cc-lbl">Autonomic Phase Space Topology — Connected Trajectory</div>
+            <div style="flex:1;position:relative;min-height:260px"><canvas id="chart-phase"></canvas></div>
+          </div>
+          <div class="cc">
+            <div class="cc-lbl">Autonomic Log Balance Index</div>
+            <canvas id="chart-abi" height="260"></canvas>
+          </div>
+        </div>
+        <div class="cc mb" style="margin-top:12px">
+          <div class="cc-lbl">Total Autonomic Drive Magnitude ‖x‖</div>
+          <canvas id="chart-totaldrive" height="140"></canvas>
+        </div>
+        <div class="g2" style="margin-top:12px">
+          <div class="cc">
+            <div class="cc-lbl">Entropy Production Rate ṡ(t) — Instantaneous Allostatic Cost</div>
+            <canvas id="chart-epr" height="160"></canvas>
+          </div>
+          <div class="cc">
+            <div class="cc-lbl">Phase-Plane Areal Velocity dA/dt — Instantaneous Rotation Rate</div>
+            <canvas id="chart-arealvel" height="160"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: Diagnostics -->
+      <div id="tab-diagnostics" class="tab-panel">
+        <div class="dchips" id="dchips"></div>
+        <div class="g2 mb">
+          <div class="cc">
+            <div class="cc-lbl">Standardized Innovations — Distribution</div>
+            <canvas id="chart-hist" height="158"></canvas>
+          </div>
+          <div class="cc">
+            <div class="cc-lbl">Normal Q-Q Plot of Innovations</div>
+            <canvas id="chart-qq" height="158"></canvas>
+          </div>
+        </div>
+        <div class="g2">
+          <div class="cc">
+            <div class="cc-lbl">Partial Autocorrelation of Innovations (lags 1–20)</div>
+            <canvas id="chart-pacf" height="158"></canvas>
+          </div>
+          <div class="cc">
+            <div class="cc-lbl">Time-Rescaling KS Uniformity Plot</div>
+            <canvas id="chart-ks" height="158"></canvas>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /results-wrap -->
+
+  </main>
+
+</div><!-- /workspace -->
+</div><!-- /app -->
+
+<footer class="site-footer">
+  Made with <span class="ft-heart">♥</span> by Matías Castillo-Aguilar
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
