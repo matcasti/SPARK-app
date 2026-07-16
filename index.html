@@ -98,17 +98,14 @@
       </div>
     </div>
 
-    <!-- Simulation Playground (collapsible) -->
+    <!-- Parameter Playground (collapsible) -->
     <div class="panel">
       <div class="panel-hdr closed" id="hdr-sim">
-        <span class="plabel">Simulation Playground</span>
+        <span class="plabel">Parameter Playground</span>
         <span class="parrow closed" id="arr-sim">▾</span>
       </div>
       <div class="pbody hidden" id="body-sim">
-        <div class="ctrl-grp">
-          <div class="ctrl-hdr"><span class="ctrl-key">ν₀</span><span class="ctrl-num" id="v-nu0">63 bpm</span></div>
-          <input type="range" id="sl-nu0" min="0.80" max="1.80" step="0.01" value="1.05">
-        </div>
+        <div class="ctrl-hint" style="margin-bottom:10px">Overrides the Kalman filter's κ/Λ parameters on the loaded data — no re-optimization. Defaults to the last MAP estimate.</div>
         <div class="ctrl-grp">
           <div class="ctrl-hdr"><span class="ctrl-key">κ_S</span><span class="ctrl-num" id="v-ks">0.070 Hz</span></div>
           <input type="range" id="sl-ks" min="0.01" max="0.50" step="0.01" value="0.07">
@@ -119,17 +116,21 @@
           <div class="ctrl-hint">Must be &gt; κ_S</div>
         </div>
         <div class="ctrl-grp">
-          <div class="ctrl-hdr"><span class="ctrl-key">N beats</span><span class="ctrl-num" id="v-nb">400</span></div>
-          <input type="range" id="sl-nb" min="100" max="800" step="50" value="400">
+          <div class="ctrl-hdr"><span class="ctrl-key">Λ_R</span><span class="ctrl-num" id="v-lr">0.00050</span></div>
+          <input type="range" id="sl-lr" min="0.0001" max="0.0050" step="0.0001" value="0.0005">
+        </div>
+        <div class="ctrl-grp">
+          <div class="ctrl-hdr"><span class="ctrl-key">Λ_P</span><span class="ctrl-num" id="v-lp">1.000</span></div>
+          <input type="range" id="sl-lp" min="0.05" max="5.00" step="0.01" value="1.00">
         </div>
         <button class="btn btn-ghost" id="btn-sim" style="margin-bottom:8px">
           <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-4.49"/></svg>
-          Simulate &amp; Analyze
+          Reset to estimated
         </button>
         <div id="sim-result" style="display:none">
-          <div class="sec" style="margin-top:4px;font-size:.59rem">Parameter Recovery</div>
+          <div class="sec" style="margin-top:4px;font-size:.59rem">Manual vs. MAP Estimate</div>
           <table class="sim-table" id="sim-table">
-            <thead><tr><th>Param</th><th>True</th><th>Estimated</th><th>Δ%</th></tr></thead>
+            <thead><tr><th>Param</th><th>Estimated</th><th>Manual</th><th>Δ%</th></tr></thead>
             <tbody id="sim-tbody"></tbody>
           </table>
         </div>

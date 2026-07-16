@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// §1  FFT  (Cooley-Tukey, in-place, sign=-1 for forward)
+// FFT  (Cooley-Tukey, in-place, sign=-1 for forward)
 // ═══════════════════════════════════════════════════════════
 function fftCore(re, im, inv) {
   const N = re.length;
@@ -26,7 +26,7 @@ function fftCore(re, im, inv) {
 const pow2 = n => 1<<Math.ceil(Math.log2(Math.max(n,2)));
 
 // ═══════════════════════════════════════════════════════════
-// §2  4×4 MATRIX UTILITIES  (row-major flat Float64Array)
+// 4×4 MATRIX UTILITIES  (row-major flat Float64Array)
 // ═══════════════════════════════════════════════════════════
 const M4 = {
   zero: ()=>new Float64Array(16),
@@ -59,7 +59,7 @@ const resetP = P => {                                  // zero rows/cols 2,3
   for(let i=0;i<4;i++){P[2*4+i]=P[3*4+i]=P[i*4+2]=P[i*4+3]=0;} };
 
 // ═══════════════════════════════════════════════════════════
-// §3  NATURAL CUBIC SPLINE
+// NATURAL CUBIC SPLINE
 // ═══════════════════════════════════════════════════════════
 function makeSpline(xs, ys) {
   const n=xs.length, h=[],al=[],l=[1],mu=[0],z=[0];
@@ -87,7 +87,7 @@ function makeSpline(xs, ys) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// §4  MORLET CWT → GLOBAL WAVELET SPECTRUM
+// MORLET CWT → GLOBAL WAVELET SPECTRUM
 // ═══════════════════════════════════════════════════════════
 function morletGWS(signal, dt) {
   const omega0=6, N=signal.length, Np=pow2(N);
@@ -129,7 +129,7 @@ function morletGWS(signal, dt) {
 //      Returns power[si][t] (Float32Array per scale row)
 // ═══════════════════════════════════════════════════════════
 function morletCWTScalogram(signal, dt) {
-  const omega0=12, N=signal.length, Np=pow2(N);
+  const omega0=6, N=signal.length, Np=pow2(N);
   const sRe=new Float64Array(Np), sIm=new Float64Array(Np);
   for(let i=0;i<N;i++) sRe[i]=signal[i];
   fftCore(sRe,sIm,false);
@@ -179,7 +179,7 @@ const _INFERNO_LUT=(()=>{
 })();
 
 // ═══════════════════════════════════════════════════════════
-// §5  SPECTRAL PRIORS  (CWT → ks_mode, kp_mode, energy_ratio)
+// SPECTRAL PRIORS  (CWT → ks_mode, kp_mode, energy_ratio)
 // ═══════════════════════════════════════════════════════════
 function extractSpectralPriors(dy) {
   const fs=4, dt=1/fs;
@@ -215,7 +215,7 @@ function extractSpectralPriors(dy) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// §6  OU BLOCK  (exact transition moments with Taylor fallback)
+// OU BLOCK  (exact transition moments with Taylor fallback)
 // ═══════════════════════════════════════════════════════════
 function ouBlock(k, dt, V) {
   const x=k*dt, s2=2*k*V;
@@ -237,7 +237,7 @@ function ouBlock(k, dt, V) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// §7  DUAL-FILTER GLS KALMAN  (causal forward pass)
+// DUAL-FILTER GLS KALMAN  (causal forward pass)
 // ═══════════════════════════════════════════════════════════
 function runGLSFilter(dy, kp, ks, lp, lR, jThr, jPow) {
   const N=dy.length;
@@ -359,7 +359,7 @@ function runGLSFilter(dy, kp, ks, lp, lR, jThr, jPow) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// §8  MAP OBJECTIVE  (returns value to minimise)
+// MAP OBJECTIVE  (returns value to minimise)
 // ═══════════════════════════════════════════════════════════
 function mapObj(theta, dy, pr, jThr, jPow) {
   const ks=Math.exp(theta[0]), kp=ks+Math.exp(theta[1]), lR=Math.exp(theta[2]);
@@ -378,7 +378,7 @@ function mapObj(theta, dy, pr, jThr, jPow) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// §9  BFGS MINIMIZER  (3-D, numerical gradient)
+// BFGS MINIMIZER  (3-D, numerical gradient)
 // ═══════════════════════════════════════════════════════════
 function bfgs(f, x0, maxIter=400) {
   const n=x0.length, h=1e-5;
@@ -416,7 +416,7 @@ function bfgs(f, x0, maxIter=400) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// §10  FIT MODEL  (main entry point, async for UI updates)
+// FIT MODEL  (main entry point, async for UI updates)
 // ═══════════════════════════════════════════════════════════
 function fitModel(dy, jThr=0.1, jPow=10) {
   const pr=extractSpectralPriors(dy);
@@ -439,7 +439,23 @@ function fitModel(dy, jThr=0.1, jPow=10) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// §11  POWER SPECTRAL DENSITY  (Daniell-smoothed periodogram)
+// MANUAL FILTER RUN  (user-specified κ/Λ, no BFGS)
+// ═══════════════════════════════════════════════════════════
+function runManualFit(dy, kp, ks, lp, lR, jThr=0.1, jPow=10) {
+  const res=runGLSFilter(dy,kp,ks,lp,lR,jThr,jPow);
+  let tAcc=0; const time=dy.map(d=>(tAcc+=d));
+  return {
+    dy,time,pr:lastFit?lastFit.pr:null,
+    params:{ks,kp,lR,lp,nu0:res.nu0,sig2:res.sig2,
+            sigP:Math.sqrt(2*kp*lp*res.sig2),sigS:Math.sqrt(2*ks*1.0*res.sig2)},
+    Xp:res.Xp, Xs:res.Xs, XpV:res.XpV, XsV:res.XsV, rrV:res.rrV,
+    irr:Array.from(res.irr), gate:res.gate,
+    innovations:res.innovations
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+// POWER SPECTRAL DENSITY  (Daniell-smoothed periodogram)
 // ═══════════════════════════════════════════════════════════
 function computePSD(signal, fs, spans=[3,5]) {
   const N=signal.length, Np=pow2(N);
@@ -477,7 +493,7 @@ function hrPSD(dy, irr, time, spans) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// §12  EXAMPLE DATA  (synthetic IPFM with OU drives)
+// EXAMPLE DATA  (synthetic IPFM with OU drives)
 // ═══════════════════════════════════════════════════════════
 function genExampleRR(N=400) {
   let s=42>>>0;
@@ -496,7 +512,7 @@ function genExampleRR(N=400) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// §13  DIAGNOSTIC & LATENT-STATE HELPERS
+// DIAGNOSTIC & LATENT-STATE HELPERS
 // ═══════════════════════════════════════════════════════════
 
 function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()||'#888'}
@@ -649,14 +665,14 @@ function derivedMetrics(fit){
 }
 
 // ═══════════════════════════════════════════════════════════
-// §14  CHART BUILDERS  (theme-aware, fully rebuilt on toggle)
+// CHART BUILDERS  (theme-aware, fully rebuilt on toggle)
 // ═══════════════════════════════════════════════════════════
 
 const _ch={};
 function destroyChart(id){if(_ch[id]){_ch[id].destroy();delete _ch[id];}}
 
 function tc(){
-  return{tx2:css('--tx2'),bd:css('--bd'),s1:css('--s1'),
+  return{tx2:css('--tx2'),tx3:css('--tx3'),bd:css('--bd'),s1:css('--s1'),
          acc:css('--acc'),teal:css('--teal'),red:css('--red'),
          grn:css('--grn'),amb:css('--amb'),pur:css('--pur')}
 }
@@ -913,16 +929,21 @@ function buildCWTChart(fit){
   // Filter to HRV band (0.01–0.50 Hz)
   const band=freqs.map((f,i)=>({f,i})).filter(({f})=>f>=0.01&&f<=0.50);
   const bFreqs=band.map(({f})=>f);
-  const bPow=band.map(({i})=>power[i]);
   const nS=bFreqs.length, nT=Ng;
+
+  // Precompute log-power once on the native nS×nT grid. _renderCWT()'s
+  // per-output-pixel bilinear loop indexes straight into this instead of
+  // recalculating Math.log() per pixel — matters once HD/4K supersampling
+  // multiplies the pixel count by dpr².
+  const logBPow=band.map(({i})=>Float64Array.from(power[i],v=>Math.log(v+1e-10)));
 
   // Global log-power range for colormap normalisation
   let pMin=Infinity, pMax=-Infinity;
-  for(const row of bPow) for(const v of row){
-    const lv=Math.log(v+1e-10); if(lv<pMin)pMin=lv; if(lv>pMax)pMax=lv;
+  for(const row of logBPow) for(const v of row){
+    if(v<pMin)pMin=v; if(v>pMax)pMax=v;
   }
 
-  _cwtCache={bFreqs,bPow,nS,nT,tMin,tMax,pMin,pRange:pMax-pMin+1e-12};
+  _cwtCache={bFreqs,logBPow,nS,nT,tMin,tMax,pMin,pRange:pMax-pMin+1e-12};
   _renderCWT();
 
   // ResizeObserver fires when container becomes visible (tab switch) or resizes
@@ -939,49 +960,69 @@ function _renderCWT(){
   const W=Math.max((cc?cc.clientWidth-30:0)||600,250);
   if(W<50) return; // still hidden in inactive tab
 
-  const{bFreqs,bPow,nS,nT,tMin,tMax,pMin,pRange}=_cwtCache;
+  const{bFreqs,logBPow,nS,nT,tMin,tMax,pMin,pRange}=_cwtCache;
   const c=tc();
   const isLight=document.documentElement.dataset.theme==='light';
 
-  // Layout constants
+  // Layout constants (CSS-pixel / logical units — unaffected by DPR below)
   const PAD={top:12,bottom:40,left:50,right:56}; // right leaves room for colorbar
   const H=350;
-  canvas.width=W; canvas.height=H;
-  const ctx=canvas.getContext('2d');
   const pW=W-PAD.left-PAD.right, pH=H-PAD.top-PAD.bottom;
+
+  // ── HD/4K-capable backing store ──
+  // Canvas width/height *attributes* size the actual pixel buffer; CSS
+  // width/height size the on-page box. Pin the CSS box to the logical W×H
+  // computed above, then give the buffer dpr× as many pixels per side so it
+  // renders crisply on Retina/4K displays instead of being upscaled (and
+  // blurred) by the compositor. Floored at 2x even when dpr=1 so the
+  // hand-drawn scalogram/text are supersampled for extra smoothness on
+  // standard displays too; capped at 3x so the O(pW·pH·dpr²) fill loop below
+  // stays fast on very high-density screens.
+  const dpr=Math.min(Math.max(window.devicePixelRatio||1,2),3);
+  canvas.style.width=W+'px';
+  canvas.style.height=H+'px';
+  canvas.width=Math.round(W*dpr);
+  canvas.height=Math.round(H*dpr);
+  const ctx=canvas.getContext('2d');
+  ctx.scale(dpr,dpr); // subsequent draw calls below use CSS-pixel coords again
 
   // Background
   ctx.fillStyle=isLight?'#FFFFFF':'#0B1120';
   ctx.fillRect(0,0,W,H);
 
   // ── Scalogram via ImageData (bilinear + log-power + inferno colormap) ──
-  const img=ctx.createImageData(pW,pH);
+  // putImageData bypasses ctx's transform matrix entirely, so this buffer is
+  // sized and placed in raw DEVICE pixels (pW*dpr etc.), not the dpr-scaled
+  // logical coordinates the rest of this function uses.
+  const pWpx=Math.round(pW*dpr), pHpx=Math.round(pH*dpr);
+  const img=ctx.createImageData(pWpx,pHpx);
   const pxBuf=img.data;
   const fMinLog=Math.log(bFreqs[nS-1]);
   const fMaxLog=Math.log(bFreqs[0]);
   const logRange=fMaxLog-fMinLog+1e-12;
 
-  for(let py=0;py<pH;py++){
-    // py=0 → top → high frequency; py=pH-1 → bottom → low frequency
-    const logF=fMaxLog-(py/(pH-1))*logRange;
+  for(let py=0;py<pHpx;py++){
+    // py=0 → top → high frequency; py=pHpx-1 → bottom → low frequency
+    const logF=fMaxLog-(py/(pHpx-1))*logRange;
     const si_f=(fMaxLog-logF)/logRange*(nS-1);
     const si0=Math.min(Math.max(0,Math.floor(si_f)),nS-2);
     const sf=si_f-si0;
-    for(let px2=0;px2<pW;px2++){
-      const ti_f=px2/(pW-1)*(nT-1);
+    const row0=logBPow[si0], row1=logBPow[si0+1];
+    for(let px2=0;px2<pWpx;px2++){
+      const ti_f=px2/(pWpx-1)*(nT-1);
       const ti0=Math.min(Math.max(0,Math.floor(ti_f)),nT-2);
       const tf=ti_f-ti0;
-      // Bilinear interpolation in log-power
-      const v00=Math.log(bPow[si0][ti0]  +1e-10), v01=Math.log(bPow[si0][ti0+1]  +1e-10);
-      const v10=Math.log(bPow[si0+1][ti0]+1e-10), v11=Math.log(bPow[si0+1][ti0+1]+1e-10);
+      // Bilinear interpolation in log-power (pre-logged — see buildCWTChart)
+      const v00=row0[ti0],   v01=row0[ti0+1];
+      const v10=row1[ti0],   v11=row1[ti0+1];
       const lv=v00*(1-sf)*(1-tf)+v01*(1-sf)*tf+v10*sf*(1-tf)+v11*sf*tf;
       const norm=Math.max(0,Math.min(1,(lv-pMin)/pRange));
       const[r,g,b]=_INFERNO_LUT[Math.round(norm*255)];
-      const idx=(py*pW+px2)*4;
+      const idx=(py*pWpx+px2)*4;
       pxBuf[idx]=r; pxBuf[idx+1]=g; pxBuf[idx+2]=b; pxBuf[idx+3]=255;
     }
   }
-  ctx.putImageData(img,PAD.left,PAD.top);
+  ctx.putImageData(img,Math.round(PAD.left*dpr),Math.round(PAD.top*dpr));
 
   // Helper: freq (Hz) → canvas y coordinate
   const freqToY=f=>PAD.top+pH-((Math.log(f)-fMinLog)/logRange)*pH;
@@ -1238,7 +1279,7 @@ function buildArealVelChart(time,arealVel){
 }
 
 // ═══════════════════════════════════════════════════════════
-// §15  PARAMETER TABLE & METRIC GRID
+// PARAMETER TABLE & METRIC GRID
 // ═══════════════════════════════════════════════════════════
 function renderParamTable(p,dm){
   const fmt=n=>isFinite(n)?n.toFixed(5):'—';
@@ -1281,9 +1322,9 @@ function renderParamTable(p,dm){
 }
 
 // ═══════════════════════════════════════════════════════════
-// §16  UI LOGIC
+// UI LOGIC
 // ═══════════════════════════════════════════════════════════
-let loadedRR=null, simParams=null, lastFit=null;
+let loadedRR=null, simParams=null, lastFit=null, autoParams=null;
 
 function parseRR(txt){
   // Parse all finite positive numbers
@@ -1303,9 +1344,9 @@ function applyTheme(light){
   document.documentElement.dataset.theme=light?'light':'';
   document.getElementById('ico-sun').style.display=light?'none':'block';
   document.getElementById('ico-moon').style.display=light?'block':'none';
-  chartDefaults();
-  if(lastFit) rebuildAllCharts(lastFit);
+  if(lastFit) renderFit(lastFit,{rebuildCWT:false});
 }
+
 document.getElementById('theme-btn').onclick=()=>{
   applyTheme(document.documentElement.dataset.theme!=='light');
 };
@@ -1371,7 +1412,7 @@ document.getElementById('btn-example').onclick=()=>{
 };
 
 function setData(rr,label){
-  loadedRR=rr; simParams=null;
+  loadedRR=rr; simParams=null; autoParams=null;
   const chip=document.getElementById('data-chip');
   chip.classList.add('ok');
   document.getElementById('data-chip-text').textContent=`${label} — ${rr.length} beats · ${rr.reduce((a,b)=>a+b,0).toFixed(1)} s`;
@@ -1394,54 +1435,78 @@ function showAlert(type,msg){
 document.getElementById('sl-jthr').oninput=function(){document.getElementById('v-jthr').textContent=parseFloat(this.value).toFixed(2);};
 document.getElementById('sl-jpow').oninput=function(){document.getElementById('v-jpow').textContent=this.value;};
 
-// ── Simulation sliders ──
+// ── Parameter Playground: live Kalman re-run with manual κ/Λ overrides ──
+let _pgTimer=null;
+
 function updateSimLabels(){
-  const nu0=parseFloat(document.getElementById('sl-nu0').value);
   const ks=parseFloat(document.getElementById('sl-ks').value);
   const kp=parseFloat(document.getElementById('sl-kp').value);
-  const nb=parseInt(document.getElementById('sl-nb').value);
-  document.getElementById('v-nu0').textContent=Math.round(nu0*60)+' bpm';
+  const lR=parseFloat(document.getElementById('sl-lr').value);
+  const lp=parseFloat(document.getElementById('sl-lp').value);
   document.getElementById('v-ks').textContent=ks.toFixed(3)+' Hz';
   document.getElementById('v-kp').textContent=kp.toFixed(3)+' Hz';
-  document.getElementById('v-nb').textContent=nb;
+  document.getElementById('v-lr').textContent=lR.toFixed(5);
+  document.getElementById('v-lp').textContent=lp.toFixed(3);
 }
-['sl-nu0','sl-ks','sl-kp','sl-nb'].forEach(id=>document.getElementById(id).addEventListener('input',updateSimLabels));
+function syncPlaygroundSliders(p){
+  document.getElementById('sl-ks').value=p.ks;
+  document.getElementById('sl-kp').value=p.kp;
+  document.getElementById('sl-lr').value=p.lR;
+  document.getElementById('sl-lp').value=p.lp;
+  updateSimLabels();
+}
+['sl-ks','sl-kp','sl-lr','sl-lp'].forEach(id=>document.getElementById(id).addEventListener('input',()=>{
+  updateSimLabels();
+  clearTimeout(_pgTimer); _pgTimer=setTimeout(runPlayground,120);
+}));
 updateSimLabels();
 
-function genSimRR(nu0,ks,kp,N,seed=42){
-  let s=seed>>>0;
-  const rng=()=>{s=Math.imul(s^s>>>15,1|s);s^=s+Math.imul(s^s>>>7,61|s);return((s^s>>>14)>>>0)/4294967296;};
-  const rn=()=>Math.sqrt(-2*Math.log(rng()+1e-9))*Math.cos(2*Math.PI*rng());
-  const Vs=0.025,Vp=0.11; let xs=0,xp=0; const rr=[];
-  for(let i=0;i<N;i++){
-    const dta=1/nu0;
-    xs=xs*Math.exp(-ks*dta)+Math.sqrt(Vs*(1-Math.exp(-2*ks*dta)))*rn();
-    xp=xp*Math.exp(-kp*dta)+Math.sqrt(Vp*(1-Math.exp(-2*kp*dta)))*rn();
-    const nu=Math.max(nu0-xp+xs,0.4);
-    rr.push(Math.max(0.3,Math.min(2.0,1/nu+0.012*rn())));
-  }
-  return rr;
+function renderSimComparison(auto,manual){
+  const rows=[{n:'κ_S',a:auto.ks,m:manual.ks},{n:'κ_P',a:auto.kp,m:manual.kp},
+              {n:'Λ_R',a:auto.lR,m:manual.lR},{n:'Λ_P',a:auto.lp,m:manual.lp}];
+  document.getElementById('sim-tbody').innerHTML=rows.map(r=>{
+    const d=100*(r.m-r.a)/r.a;
+    const cls=Math.abs(d)<5?'dok':Math.abs(d)<15?'dpos':'dneg';
+    return`<tr><td>${r.n}</td><td>${r.a.toFixed(4)}</td><td>${r.m.toFixed(4)}</td><td class="${cls}">${d>0?'+':''}${d.toFixed(1)}%</td></tr>`;
+  }).join('');
+  document.getElementById('sim-result').style.display='block';
 }
 
-document.getElementById('btn-sim').onclick=async function(){
-  const nu0=parseFloat(document.getElementById('sl-nu0').value);
+function runPlayground(){
+  if(!loadedRR||!autoParams) return;
   const ks=parseFloat(document.getElementById('sl-ks').value);
   const kp=parseFloat(document.getElementById('sl-kp').value);
-  const nb=parseInt(document.getElementById('sl-nb').value);
+  const lR=parseFloat(document.getElementById('sl-lr').value);
+  const lp=parseFloat(document.getElementById('sl-lp').value);
   if(kp<=ks){showAlert('err','κ_P must be greater than κ_S for a valid model.');return;}
-  const rr=genSimRR(nu0,ks,kp,nb);
-  setData(rr,'Simulated data');          // resets simParams→null, so assign after
-  simParams={nu0,ks,kp};
-  showAlert('ok',`Synthetic RR generated (ν₀=${Math.round(nu0*60)} bpm, κ_S=${ks.toFixed(3)}, κ_P=${kp.toFixed(3)}). Launching analysis…`);
-  await new Promise(r=>setTimeout(r,80));
-  document.getElementById('btn-run').click();
+  try{
+    const jThr=parseFloat(document.getElementById('sl-jthr').value);
+    const jPow=parseFloat(document.getElementById('sl-jpow').value);
+    const fit=runManualFit(loadedRR,kp,ks,lp,lR,jThr,jPow);
+    lastFit=fit;
+    simParams={ks,kp,lR,lp};
+    renderFit(fit,{rebuildCWT:false});
+    renderSimComparison(autoParams,simParams);
+  }catch(e){
+    showAlert('err','Manual filter run failed: '+e.message);
+    console.error(e);
+  }
+}
+
+document.getElementById('btn-sim').onclick=function(){
+  if(!autoParams){showAlert('err','Run the main analysis first to obtain MAP-estimated defaults.');return;}
+  syncPlaygroundSliders(autoParams);
+  runPlayground();
 };
 
-// ── Full chart rebuild (used on theme toggle) ──
-function rebuildAllCharts(fit){
-  if(!fit) return;
+// ── Unified renderer: charts + param table + diagnostics ──
+// Usado por btn-run (fit BFGS), el playground manual y el toggle de tema.
+function renderFit(fit, opts={}){
+  if(!fit) return null;
   chartDefaults();
   const dm=derivedMetrics(fit);
+  renderParamTable(fit.params,dm);
+
   buildRRChart(fit.time,fit.dy,fit.irr,fit.rrV,fit.gate);
   buildStatesChart(fit.time,fit.Xp,fit.Xs,fit.XpV,fit.XsV);
   buildPhaseChart(fit.Xp,fit.Xs,fit.params);
@@ -1451,16 +1516,31 @@ function rebuildAllCharts(fit){
   buildArealVelChart(fit.time,dm.arealVel);
   const psd=hrPSD(fit.dy,fit.irr,fit.time);
   buildPSDChart(psd.obs.freq,psd.obs.pow,psd.flt.freq,psd.flt.pow);
-  _renderCWT();
+  if(opts.rebuildCWT===false) _renderCWT(); else buildCWTChart(fit);
+
+  let ksRes={D:NaN,p:NaN,u:[],N:0}, pacfArr=[];
   if(fit.innovations){
     const validZ=fit.innovations.filter((_,i)=>Array.from(fit.gate)[i]<1.5);
-    const pacf=computePACF(validZ,20);
-    const ks=ksTest(fit.innovations,fit.gate);
+    pacfArr=computePACF(validZ,20);
+    ksRes=ksTest(fit.innovations,fit.gate);
     buildHistChart(fit.innovations,fit.gate);
     buildQQChart(fit.innovations,fit.gate);
-    buildPACFChart(pacf,validZ.length);
-    buildKSChart(ks);
+    buildPACFChart(pacfArr,validZ.length);
+    buildKSChart(ksRes);
   }
+
+  const b95=1.96/Math.sqrt(Math.max(ksRes.N,1));
+  const nViol=pacfArr.filter(v=>Math.abs(v)>b95).length;
+  const ksOk=ksRes.p>0.05;
+  document.getElementById('dchips').innerHTML=`
+    <div class="dchip ${ksOk?'pass':'fail'}"><span class="dk">KS p-value</span><span class="dv">${isFinite(ksRes.p)?ksRes.p.toFixed(4):'—'}</span></div>
+    <div class="dchip ${ksOk?'pass':'fail'}"><span class="dk">KS stat</span><span class="dv">${isFinite(ksRes.D)?ksRes.D.toFixed(4):'—'}</span></div>
+    <div class="dchip ${nViol===0?'pass':nViol<=2?'warn':'fail'}"><span class="dk">PACF violations</span><span class="dv">${nViol}/20 lags</span></div>
+    <div class="dchip ${dm.pctGated<5?'pass':dm.pctGated<15?'warn':'fail'}"><span class="dk">Gated beats</span><span class="dv">${dm.pctGated.toFixed(1)}%</span></div>
+    <div class="dchip"><span class="dk">Fit RMSE</span><span class="dv">${dm.rmse.toFixed(2)} ms</span></div>
+    <div class="dchip"><span class="dk">Fit MAPE</span><span class="dv">${dm.mape.toFixed(2)}%</span></div>`;
+
+  return dm;
 }
 
 // ── Main run button ──
@@ -1485,60 +1565,15 @@ document.getElementById('btn-run').onclick=async function(){
 
     const fit=fitModel(loadedRR,jThr,jPow);
     lastFit=fit;
+    autoParams={ks:fit.params.ks,kp:fit.params.kp,lR:fit.params.lR,lp:fit.params.lp};
+    syncPlaygroundSliders(autoParams);
+    simParams=null;
+    document.getElementById('sim-result').style.display='none';
 
     setProgress('Computing derived metrics and building charts…',82);
     await new Promise(r=>requestAnimationFrame(r));
 
-    const dm=derivedMetrics(fit);
-    renderParamTable(fit.params,dm);
-
-    chartDefaults();
-    buildRRChart(fit.time,fit.dy,fit.irr,fit.rrV,fit.gate);
-    buildStatesChart(fit.time,fit.Xp,fit.Xs,fit.XpV,fit.XsV);
-    buildPhaseChart(fit.Xp,fit.Xs,fit.params);
-    buildABIChart(fit.time,dm.abi);
-    buildTotalDriveChart(fit.time,dm.tad);
-    buildEPRChart(fit.time,dm.epr);
-    buildArealVelChart(fit.time,dm.arealVel);
-    const psd=hrPSD(fit.dy,fit.irr,fit.time);
-    buildPSDChart(psd.obs.freq,psd.obs.pow,psd.flt.freq,psd.flt.pow);
-    buildCWTChart(fit);
-
-    // Diagnostics
-    let ksRes={D:NaN,p:NaN,u:[],N:0}, pacfArr=[];
-    if(fit.innovations){
-      const validZ=fit.innovations.filter((_,i)=>Array.from(fit.gate)[i]<1.5);
-      pacfArr=computePACF(validZ,20);
-      ksRes=ksTest(fit.innovations,fit.gate);
-      buildHistChart(fit.innovations,fit.gate);
-      buildQQChart(fit.innovations,fit.gate);
-      buildPACFChart(pacfArr,validZ.length);
-      buildKSChart(ksRes);
-    }
-
-    // Diagnostic chips
-    const b95=1.96/Math.sqrt(Math.max(ksRes.N,1));
-    const nViol=pacfArr.filter(v=>Math.abs(v)>b95).length;
-    const ksOk=ksRes.p>0.05;
-    document.getElementById('dchips').innerHTML=`
-      <div class="dchip ${ksOk?'pass':'fail'}"><span class="dk">KS p-value</span><span class="dv">${isFinite(ksRes.p)?ksRes.p.toFixed(4):'—'}</span></div>
-      <div class="dchip ${ksOk?'pass':'fail'}"><span class="dk">KS stat</span><span class="dv">${isFinite(ksRes.D)?ksRes.D.toFixed(4):'—'}</span></div>
-      <div class="dchip ${nViol===0?'pass':nViol<=2?'warn':'fail'}"><span class="dk">PACF violations</span><span class="dv">${nViol}/20 lags</span></div>
-      <div class="dchip ${dm.pctGated<5?'pass':dm.pctGated<15?'warn':'fail'}"><span class="dk">Gated beats</span><span class="dv">${dm.pctGated.toFixed(1)}%</span></div>
-      <div class="dchip"><span class="dk">Fit RMSE</span><span class="dv">${dm.rmse.toFixed(2)} ms</span></div>
-      <div class="dchip"><span class="dk">Fit MAPE</span><span class="dv">${dm.mape.toFixed(2)}%</span></div>`;
-
-    // Simulation parameter recovery display
-    if(simParams){
-      const sp=simParams,ep=fit.params;
-      const pars=[{n:'ν₀',tr:sp.nu0,est:ep.nu0},{n:'κ_S',tr:sp.ks,est:ep.ks},{n:'κ_P',tr:sp.kp,est:ep.kp}];
-      document.getElementById('sim-tbody').innerHTML=pars.map(r=>{
-        const d=100*(r.est-r.tr)/r.tr;
-        const cls=Math.abs(d)<5?'dok':Math.abs(d)<15?'dpos':'dneg';
-        return`<tr><td>${r.n}</td><td>${r.tr.toFixed(4)}</td><td>${r.est.toFixed(4)}</td><td class="${cls}">${d>0?'+':''}${d.toFixed(1)}%</td></tr>`;
-      }).join('');
-      document.getElementById('sim-result').style.display='block';
-    }
+    const dm=renderFit(fit);
 
     // Activate Overview tab
     document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
