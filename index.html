@@ -137,6 +137,39 @@
       </div>
     </div>
 
+    <!-- Filtered RR Output (collapsible) -->
+    <div class="panel">
+      <div class="panel-hdr closed" id="hdr-export">
+        <span class="plabel">Filtered RR Output</span>
+        <span class="parrow closed" id="arr-export">▾</span>
+      </div>
+      <div class="pbody hidden" id="body-export">
+        <div class="ctrl-hint" style="margin-bottom:10px">The Kalman-filtered RR series is cleaned of ectopic beats and measurement noise. Use it to re-estimate the model, or export it.</div>
+        <button class="btn btn-ghost" id="btn-use-filtered" style="margin-bottom:9px">
+          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          Re-run using filtered RR
+        </button>
+        <div class="ctrl-grp">
+          <div class="ctrl-hdr"><span class="ctrl-key">Unit</span></div>
+          <select id="exp-unit" class="sel-ctrl">
+            <option value="s">Seconds (s)</option>
+            <option value="ms">Milliseconds (ms)</option>
+          </select>
+        </div>
+        <div class="ctrl-grp">
+          <div class="ctrl-hdr"><span class="ctrl-key">Format</span></div>
+          <select id="exp-fmt" class="sel-ctrl">
+            <option value="csv">CSV (.csv)</option>
+            <option value="txt">Plain text (.txt)</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="btn-export-filtered">
+          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Download filtered RR
+        </button>
+      </div>
+    </div>
+
   </aside>
 
   <!-- ── CONTENT ── -->

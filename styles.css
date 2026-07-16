@@ -80,6 +80,14 @@ input[type=file]{display:none}
 .btn-ghost:hover:not(:disabled){background:var(--s2)}
 .btn-ghost:disabled{opacity:.38;cursor:not-allowed}
 
+/* ── SELECT CONTROL ── */
+.sel-ctrl{width:100%;padding:7px 9px;font-size:.75rem;font-family:var(--font-ui);
+  border-radius:var(--rs);background:var(--s1);color:var(--tx1);
+  border:1px solid var(--bd);cursor:pointer;outline:none;transition:var(--tr);
+  margin-bottom:9px}
+.sel-ctrl:hover{background:var(--s2)}
+.sel-ctrl:focus{border-color:var(--acc)}
+
 /* ── PROGRESS ── */
 .prog-wrap{margin-top:9px}
 .prog-track{width:100%;height:2px;background:var(--s2);border-radius:2px;overflow:hidden}

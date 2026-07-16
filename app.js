@@ -1383,6 +1383,7 @@ function initCollapse(hdrId,bodyId,arrId){
 }
 initCollapse('hdr-opts','body-opts','arr-opts');
 initCollapse('hdr-sim','body-sim','arr-sim');
+initCollapse('hdr-export','body-export','arr-export');
 
 // ── Drag-and-drop on drop zone ──
 const dz=document.getElementById('drop-zone');
@@ -1497,6 +1498,31 @@ document.getElementById('btn-sim').onclick=function(){
   if(!autoParams){showAlert('err','Run the main analysis first to obtain MAP-estimated defaults.');return;}
   syncPlaygroundSliders(autoParams);
   runPlayground();
+};
+
+// ── Filtered RR reuse & export ──
+// fit.irr is the Kalman-reconstructed ("cleaned") RR series, already in
+// seconds — the same internal unit as loadedRR — so it can be handed
+// straight back to setData() with no reparsing.
+document.getElementById('btn-use-filtered').onclick=()=>{
+  if(!lastFit){showAlert('err','Run the analysis first to generate a filtered RR series.');return;}
+  setData(Array.from(lastFit.irr),'Filtered RR (re-estimation)');
+  showAlert('ok','Filtered RR loaded as new input — click Run Analysis to re-estimate.');
+};
+
+document.getElementById('btn-export-filtered').onclick=()=>{
+  if(!lastFit){showAlert('err','Run the analysis first to generate a filtered RR series.');return;}
+  const unit=document.getElementById('exp-unit').value;   // 's' | 'ms'
+  const fmt=document.getElementById('exp-fmt').value;      // 'csv' | 'txt'
+  const dp=unit==='ms'?2:4;
+  const lines=Array.from(lastFit.irr,v=>(unit==='ms'?v*1000:v).toFixed(dp));
+  const content=(fmt==='csv'?`rr_interval_${unit}\n`:'')+lines.join('\n')+'\n';
+  const blob=new Blob([content],{type:fmt==='csv'?'text/csv':'text/plain'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=`spark_filtered_rr_${unit}.${fmt}`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
 };
 
 // ── Unified renderer: charts + param table + diagnostics ──
