@@ -1473,12 +1473,16 @@ function renderSimComparison(auto,manual){
   document.getElementById('sim-result').style.display='block';
 }
 
-function runPlayground(){
+function runPlayground(exact){
   if(!loadedRR||!autoParams) return;
-  const ks=parseFloat(document.getElementById('sl-ks').value);
-  const kp=parseFloat(document.getElementById('sl-kp').value);
-  const lR=parseFloat(document.getElementById('sl-lr').value);
-  const lp=parseFloat(document.getElementById('sl-lp').value);
+  // "Reset to estimated" pasa autoParams directamente (exact), evitando el
+  // redondeo que el navegador aplica a input[type=range].value al step más
+  // cercano cuando se asigna por JS (ver syncPlaygroundSliders). Arrastrar
+  // un slider a mano sigue leyendo el DOM normalmente (exact===undefined).
+  const ks=exact?exact.ks:parseFloat(document.getElementById('sl-ks').value);
+  const kp=exact?exact.kp:parseFloat(document.getElementById('sl-kp').value);
+  const lR=exact?exact.lR:parseFloat(document.getElementById('sl-lr').value);
+  const lp=exact?exact.lp:parseFloat(document.getElementById('sl-lp').value);
   if(kp<=ks){showAlert('err','κ_P must be greater than κ_S for a valid model.');return;}
   try{
     const jThr=parseFloat(document.getElementById('sl-jthr').value);
@@ -1497,7 +1501,7 @@ function runPlayground(){
 document.getElementById('btn-sim').onclick=function(){
   if(!autoParams){showAlert('err','Run the main analysis first to obtain MAP-estimated defaults.');return;}
   syncPlaygroundSliders(autoParams);
-  runPlayground();
+  runPlayground(autoParams);
 };
 
 // ── Filtered RR reuse & export ──
