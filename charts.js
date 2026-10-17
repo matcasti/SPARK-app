@@ -568,11 +568,23 @@ function renderLandscape() {
   // mean flow: one arrow per well-visited cell, pointing where the states move next on average, length growing with speed; dark halo + white core stay visible on any heat colour
   if (A.showFlow && L.flow.length) {
     const spd = f => Math.hypot(f.du, f.dv), mx = Math.max(...L.flow.map(spd)) || 1, cellPx = Math.min(pw, ph) / L.flowBins, ru = L.limits.u[1] - L.limits.u[0], rv = L.limits.v[1] - L.limits.v[0];
-    const arrow = (x0, y0, x1, y1, w, head) => { const a = Math.atan2(y1 - y0, x1 - x0); ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1 - head * 0.6 * Math.cos(a), y1 - head * 0.6 * Math.sin(a)); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x1 - head * Math.cos(a - 0.45), y1 - head * Math.sin(a - 0.45)); ctx.lineTo(x1 - head * Math.cos(a + 0.45), y1 - head * Math.sin(a + 0.45)); ctx.closePath(); ctx.fill(); ctx.stroke(); };
-    const items = L.flow.map(f => { const px = f.du / ru * pw, py = -f.dv / rv * ph, m = Math.hypot(px, py) || 1, len = cellPx * (0.45 + 0.75 * Math.sqrt(spd(f) / mx)), cx = X(f.u), cy = Y(f.v); return [cx - px / m * len / 2, cy - py / m * len / 2, cx + px / m * len / 2, cy + py / m * len / 2]; });
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(8,12,24,.78)'; ctx.fillStyle = 'rgba(8,12,24,.78)'; items.forEach(q => arrow(q[0], q[1], q[2], q[3], 4.6, 9.5));
-    ctx.strokeStyle = '#FFFFFF'; ctx.fillStyle = '#FFFFFF'; items.forEach(q => arrow(q[0], q[1], q[2], q[3], 2, 8));
+    const arrow = (x0, y0, x1, y1, w, head) => {
+       const a = Math.atan2(y1 - y0, x1 - x0);
+       ctx.lineWidth = w;
+       ctx.beginPath();
+       ctx.moveTo(x0, y0);
+       ctx.lineTo(x1 - head * 0.6 * Math.cos(a), y1 - head * 0.6 * Math.sin(a));
+       ctx.stroke(); ctx.beginPath();
+       ctx.moveTo(x1, y1);
+       ctx.lineTo(x1 - head * Math.cos(a - 0.45), y1 - head * Math.sin(a - 0.45));
+       ctx.lineTo(x1 - head * Math.cos(a + 0.45), y1 - head * Math.sin(a + 0.45));
+       ctx.closePath(); ctx.fill(); ctx.stroke();
+    };
+    const items = L.flow.map(f => { const px = f.du / ru * pw, py = -f.dv / rv * ph, m = Math.hypot(px, py) || 1, len = cellPx * (0.1 + 0.8 * Math.sqrt(spd(f) / mx)), cx = X(f.u), cy = Y(f.v); return [cx - px / m * len / 2, cy - py / m * len / 2, cx + px / m * len / 2, cy + py / m * len / 2]; });
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(8,12,24,.78)'; ctx.fillStyle = 'rgba(8,12,24,.78)';
+    items.forEach(q => arrow(q[0], q[1], q[2], q[3], 3, 7));
+    ctx.strokeStyle = '#FFFFFF'; ctx.fillStyle = '#FFFFFF';
+    items.forEach(q => arrow(q[0], q[1], q[2], q[3], 2, 6));
   }
   // phase centroids, joined in the order of the protocol
   if (R.phases && ev) {
