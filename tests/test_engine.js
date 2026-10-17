@@ -11,6 +11,7 @@ for (const [name, r] of Object.entries(ref)) {
   console.log('\n== ' + name + ' (N = ' + r.dy.length + ')');
   const pri = E.sparkPriors(), ctl = E.sparkControl(), pr = E.extractSpectralPriors(r.dy, pri);
   check('spectral anchor V_p/V_s', rel(pr.energy_ratio, r.energy_ratio) < 1e-6, 'JS ' + pr.energy_ratio.toPrecision(8) + ' vs R ' + r.energy_ratio.toPrecision(8));
+  check('vagal-floor default is 0.5 (the app) and 0.1 reproduces the R engine\'s own default', pri.lower_lf_vagal_fraction === 0.5 && rel(E.extractSpectralPriors(r.dy, E.sparkPriors({ lower_lf_vagal_fraction: 0.1 })).energy_ratio, r.energy_ratio_floor01) < 1e-6, 'V_P/V_S: 0.5 -> ' + pr.energy_ratio.toPrecision(5) + ', 0.1 -> ' + E.extractSpectralPriors(r.dy, E.sparkPriors({ lower_lf_vagal_fraction: 0.1 })).energy_ratio.toPrecision(5));
   check('LF / HF band power (diagnostic)', rel(pr.p_lf, r.p_lf) < 1e-5 && rel(pr.p_hf, r.p_hf) < 1e-5);
   const F = r.filter, f = E.runGLSFilter(r.dy, F.params.kp, F.params.ks, r.energy_ratio, F.params.lR, F.params.gamma, ctl);
   check('gated filter: LL*, nu0, sigma^2', rel(f.LL_star, F.LL_star) < 1e-9 && rel(f.nu0, F.nu0) < 1e-9 && rel(f.sig2, F.sig2) < 1e-9, 'dLL ' + Math.abs(f.LL_star - F.LL_star).toExponential(1));

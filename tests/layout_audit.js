@@ -26,7 +26,7 @@ function measure(tab) {
     if (b.right > vw + 1 || b.left < -1) add('card-outside-viewport', id, `left ${Math.round(b.left)} right ${Math.round(b.right)} vw ${vw}`);
     if (bb.height < 110) add('card-collapsed', id, `body height ${Math.round(bb.height)}`);
     { const hv = parseFloat(getComputedStyle(body).getPropertyValue('--h')) || 260, land = vh <= 520 && vw > vh, exp = Math.min(Math.max(land ? 150 : 180, hv), (land ? 0.78 : 0.82) * vh);
-      if (!body.classList.contains('auto') && !cc.classList.contains('fullscreen') && Math.abs(bb.height - exp) > 3) add('card-height-wrong', id, `body ${Math.round(bb.height)} expected ${Math.round(exp)} (--h ${hv}, vh ${vh})`); }
+      if (!body.classList.contains('auto') && !body.classList.contains('sq') && !cc.classList.contains('fullscreen') && bb.height < exp - 3) add('card-height-wrong', id, `body ${Math.round(bb.height)} below the minimum ${Math.round(exp)} (--h ${hv}, vh ${vh})`); }
     if (bb.width < 240 && vw >= 360) add('card-narrow', id, `body width ${Math.round(bb.width)}`);
     if (cb && (Math.abs(cb.width - bb.width) > 2 || Math.abs(cb.height - bb.height) > 2)) add('canvas-mismatch', id, `canvas ${Math.round(cb.width)}x${Math.round(cb.height)} vs body ${Math.round(bb.width)}x${Math.round(bb.height)}`);
     if (cv && cv.id !== 'chart-cwt' && cv.id !== 'chart-landscape') { const ratio = (cv.width / (devicePixelRatio || 1)) / (cb.width || 1); if (cb.width && (ratio < 0.9 || ratio > 1.1)) add('canvas-bitmap-stretched', id, `bitmap ${cv.width}x${cv.height} css ${Math.round(cb.width)}x${Math.round(cb.height)} dpr ${devicePixelRatio}`); }
@@ -35,6 +35,19 @@ function measure(tab) {
     const hdr = cc.querySelector('.cc-head'); if (hdr && hdr.scrollWidth > hdr.clientWidth + 2) add('card-header-clipped', id, `${hdr.scrollWidth} > ${hdr.clientWidth}`);
     if (body.scrollHeight > body.clientHeight + 4 && body.classList.contains('auto')) add('card-content-clipped', id, `scrollH ${body.scrollHeight} > ${body.clientHeight}`);
   });
+  // rows of cards must be full, equal in height, and paired cards must not leave blank space inside
+  { const grid = panel.querySelector('.cc-grid'); if (grid) {
+    const gb = r(grid), cards = Array.from(grid.children).filter(c => c.classList.contains('cc') && !c.classList.contains('is-hidden')), rows = [];
+    cards.forEach(c => { const b = r(c); let row = rows.find(x => Math.abs(x.top - b.top) < 3); if (!row) rows.push(row = { top: b.top, items: [] }); row.items.push({ b, id: c.dataset.chart }); });
+    rows.forEach(row => { const left = Math.min(...row.items.map(i => i.b.left)), right = Math.max(...row.items.map(i => i.b.right)), ids = row.items.map(i => i.id).join('+');
+      if (right - left < gb.width - 3) add('row-not-filled', ids, `row spans ${Math.round(right - left)} of ${Math.round(gb.width)} px`);
+      if (row.items.length > 1 && Math.max(...row.items.map(i => i.b.height)) - Math.min(...row.items.map(i => i.b.height)) > 2) add('row-unequal-heights', ids, row.items.map(i => Math.round(i.b.height)).join(' vs ')); });
+    cards.forEach(c => { const body = c.querySelector('.cc-body'); if (!body || !body.classList.contains('auto')) return; const kids = Array.from(body.children).filter(k => !k.classList.contains('se-note')); const last = kids[kids.length - 1], note = body.querySelector('.se-note');
+      if (last && note) { const gap = r(note).top - r(last).bottom; if (gap > 110) add('blank-space-in-card', c.dataset.chart, `${Math.round(gap)} px between content and note`); }
+      else if (last && r(body).bottom - r(last).bottom > 110) add('blank-space-in-card', c.dataset.chart, `${Math.round(r(body).bottom - r(last).bottom)} px below the content`); });
+    ['phase', 'landscape'].forEach(id => { const c = panel.querySelector(`.cc[data-chart="${id}"]`); if (!c || c.classList.contains('is-hidden')) return; const b = r(c.querySelector('.cc-body')); if (Math.abs(b.width / b.height - 1) > 0.02) add('not-square', id, `${Math.round(b.width)} x ${Math.round(b.height)}`); });
+  } }
+  if (tab === 'overview') { const mcs = Array.from(panel.querySelectorAll('.mc')), rows = {}; mcs.forEach(m => { const k = Math.round(r(m).top / 4); rows[k] = (rows[k] || 0) + 1; }); const counts = Object.values(rows); if (counts.length && new Set(counts).size > 1) add('metric-grid-ragged', 'overview', 'cards per row: ' + counts.join(',')); }
   // clipped (hidden overflow) horizontally, not scrollable
   panel.querySelectorAll('*').forEach(el => { const cs = getComputedStyle(el); if ((cs.overflowX === 'hidden' || cs.overflowX === 'clip') && el.scrollWidth > el.clientWidth + 2 && vis(el) && !['CANVAS'].includes(el.tagName) && el.clientWidth > 0) add('clipped-content', (el.className || el.tagName) + ' in ' + (el.parentElement.className || el.parentElement.tagName), `"${el.textContent.trim().slice(0, 30)}" scrollW ${el.scrollWidth} > clientW ${el.clientWidth}`); });
   // overview specifics
@@ -70,7 +83,7 @@ function sticky() {
     await page.click('#btn-example'); if (w <= 860) { /* drawer still open */ } await page.click('#btn-run'); await page.waitForFunction(() => document.getElementById('results-wrap').style.display === 'block', { timeout: 60000 }); await sleep(900);
     const rec = { name, w, h, dpr, errors: errs, tabs: [], extras: { closedSidebar: rec0.closedSidebar } };
     for (const tab of TABS) {
-      await page.evaluate(t => document.querySelector(`.tab-btn[data-tab="${t}"]`).click(), tab); await sleep(600);
+      await page.evaluate(t => document.querySelector(`.tab-btn[data-tab="${t}"]`).click(), tab); await sleep(300); await page.evaluate(() => SparkCharts.whenIdle()); await sleep(500);
       const m = await page.evaluate(measure, tab); rec.tabs.push(m);
       if (tab === 'overview') rec.extras.sticky = await page.evaluate(sticky);
       if (SHOTS) await page.screenshot({ path: `/tmp/audit_shots/${name}_${tab}.png`, fullPage: false });
@@ -89,7 +102,7 @@ function sticky() {
     if (SHOTS) await page.screenshot({ path: `/tmp/audit_shots/${name}_menu.png` });
     await page.evaluate(() => document.getElementById('btn-export').click()); await sleep(100);
     rec.extras.fullscreen = await page.evaluate(async () => { const cc = document.querySelector('.cc[data-chart="rr"]'); cc.querySelector('[data-act="full"]').click(); await new Promise(r => setTimeout(r, 450)); const b = cc.getBoundingClientRect(), body = cc.querySelector('.cc-body').getBoundingClientRect(), cv = cc.querySelector('canvas').getBoundingClientRect(); const o = { cardW: Math.round(b.width), cardH: Math.round(b.height), bodyH: Math.round(body.height), canvasH: Math.round(cv.height), vh: innerHeight, vw: innerWidth }; if (typeof window.__shot === 'function') window.__shot(); cc.querySelector('[data-act="full"]').click(); await new Promise(r => setTimeout(r, 300)); return o; });
-    if (w <= 860) { await page.evaluate(() => { document.getElementById('menu-btn').click(); }); await sleep(450); rec.extras.drawer = await page.evaluate(() => { const sb = document.getElementById('sidebar'), b = sb.getBoundingClientRect(); return { left: Math.round(b.left), right: Math.round(b.right), width: Math.round(b.width), top: Math.round(b.top), bottom: Math.round(b.bottom), vh: innerHeight, scrollable: sb.scrollHeight > sb.clientHeight + 2, overflowY: getComputedStyle(sb).overflowY }; }); if (SHOTS) await page.screenshot({ path: `/tmp/audit_shots/${name}_drawer.png` }); }
+    if (w <= 860) { await page.evaluate(() => { document.getElementById('menu-btn').click(); }); await page.evaluate(() => SparkCharts.whenIdle()); await sleep(600); rec.extras.drawer = await page.evaluate(() => { const sb = document.getElementById('sidebar'), b = sb.getBoundingClientRect(); return { left: Math.round(b.left), right: Math.round(b.right), width: Math.round(b.width), top: Math.round(b.top), bottom: Math.round(b.bottom), vh: innerHeight, scrollable: sb.scrollHeight > sb.clientHeight + 2, overflowY: getComputedStyle(sb).overflowY }; }); if (SHOTS) await page.screenshot({ path: `/tmp/audit_shots/${name}_drawer.png` }); }
     report.push(rec); await page.close();
   }
   await browser.close();

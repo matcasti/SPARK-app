@@ -51,7 +51,7 @@ function paramRows(fit, rep) {
 function bgColor() { const b = X().background; if (b === 'white') return '#ffffff'; if (b === 'black') return '#0B1120'; return doc.documentElement.dataset.theme === 'light' ? '#ffffff' : '#0B1120'; }
 function cardTitle(id) { const c = root.SparkCharts.CARDS.find(x => x.id === id); return c ? c.title : id; }
 /** Render a card canvas to a PNG Blob at the configured scale, with a title strip and a footer. */
-async function renderPNG(id, scaleIn) {
+function compose(id, scaleIn) {
   const cv = root.SparkCharts.getCanvas(id); if (!cv) throw new Error('Nothing to export for this chart yet.');
   const chart = root.SparkCharts.charts[id], scale = scaleIn || X().scale || 2;
   let src = cv, restore = null;
@@ -67,6 +67,11 @@ async function renderPNG(id, scaleIn) {
   g.fillStyle = dark ? '#507098' : '#486888'; g.font = `${Math.round(8.5 * scale)}px -apple-system,Segoe UI,sans-serif`;
   g.fillText(`SPARK M3G · ${slug(ctx.label)}${ctx.fit ? ' · ' + ctx.fit.dy.length + ' beats' : ''}`, Math.round(10 * scale), pad + h + foot / 2);
   if (restore) restore();
+  return out;
+}
+/** Render a card to a PNG Blob. The card's tab is made visible while it is drawn (hidden tabs have no size), then restored. */
+async function renderPNG(id, scaleIn) {
+  const out = root.SparkCharts.withVisible(id, () => compose(id, scaleIn));
   return new Promise((res, rej) => { if (out.toBlob) out.toBlob(b => b ? res(b) : rej(new Error('PNG encoding failed')), 'image/png'); else rej(new Error('Canvas export unsupported')); });
 }
 async function chartPNG(id) { try { const b = await renderPNG(id); download(b, fname(id, 'png')); toast('Saved ' + fname(id, 'png'), 'ok'); } catch (e) { toast(e.message, 'err'); } }
@@ -108,27 +113,38 @@ function beatsCSV() {
   for (let i = 0; i < f.dy.length; i++) { const sr = Math.sqrt(Math.max(f.rrV[i], 0)); rows.push([i + 1, nfix(f.time[i], 4), nfix(f.dy[i], 5), nfix(f.irr[i], 5), nfix(f.irr[i] - 1.96 * sr, 5), nfix(f.irr[i] + 1.96 * sr, 5), nf(f.Xp[i], 7), nf(Math.sqrt(Math.max(f.XpV[i], 0)), 6), nf(f.Xs[i], 7), nf(Math.sqrt(Math.max(f.XsV[i], 0)), 6), nf(f.gain[i], 6), nf(f.gate[i], 6), nf(f.innovations[i], 6), nf(f.innovations_diagnostic[i], 6)]); }
   download(csv(h, rows), fname('beats', 'csv'), 'text/csv'); toast('Saved per-beat CSV (' + rows.length + ' rows)', 'ok');
 }
+function phasesCSV() {
+  const ev = ctx.events, ph = ctx.phases || []; if (!ev) return toast('No phases to export yet.', 'err');
+  const stat = s => { if (ev.source !== 'auto' || !ev.boundaries.length) return ['', '']; const b = ev.boundaries.reduce((a, q) => Math.abs(q.t - s.from) < Math.abs(a.t - s.from) ? q : a, ev.boundaries[0]); return Math.abs(b.t - s.from) < 60 && s.from > 0 ? [nfix(b.deltaBpm, 1), nfix(b.z, 2)] : ['', '']; };
+  const rows = ev.segments.map((s, i) => { const r = ph[i] || {}, st = stat(s); return [s.name, s.kind, ev.source, nfix(s.from, 2), nfix(s.to, 2), nfix(s.to - s.from, 2), nfix(r.hr, 2), nfix(r.rmssdObs, 2), nf(r.xp, 6), nf(r.xs, 6), nf(r.sdXp, 6), nf(r.sdXs, 6), nfix(r.shift, 3), st[0], st[1]]; });
+  download(csv(['phase', 'kind', 'source', 'from_s', 'to_s', 'duration_s', 'hr_bpm', 'rmssd_ms', 'mean_xp_hz', 'mean_xs_hz', 'sd_xp_hz', 'sd_xs_hz', 'shift_from_rest_sigma', 'change_at_start_bpm', 'change_z'], rows), fname('phases', 'csv'), 'text/csv'); toast('Saved phases CSV', 'ok');
+}
+function phaseHRVCSV() {
+  const rows = ctx.bundle && ctx.bundle.phaseHRV; if (!rows) return toast('Nothing to export yet.', 'err');
+  const out = []; rows.forEach(r => ['obs', 'flt'].forEach(k => { const h = r[k]; if (h) out.push([r.name, r.kind, k === 'obs' ? 'observed' : 'filtered', nfix(r.from, 2), nfix(r.to, 2), nfix(r.duration, 2), r.n, nfix(h.meanHR, 3), nfix(h.meanRR, 2), nfix(h.SDNN, 3), nfix(h.RMSSD, 3), nfix(h.pNN50, 3), nf(h.LF, 6), nf(h.HF, 6), nf(h.LFHF, 5)]); }));
+  download(csv(['window', 'kind', 'signal', 'from_s', 'to_s', 'duration_s', 'beats', 'mean_hr_bpm', 'mean_rr_ms', 'sdnn_ms', 'rmssd_ms', 'pnn50_pct', 'lf_ms2', 'hf_ms2', 'lf_hf'], out), fname('hrv_per_window', 'csv'), 'text/csv'); toast('Saved per-window statistics CSV', 'ok');
+}
 function filteredRR(unit, fmt) {
-  const f = ctx.fit, dp = unit === 'ms' ? 2 : 4, lines = Array.from(f.irr, v => nfix(unit === 'ms' ? v * 1000 : v, dp));
+  const f = ctx.fit, dp = unit === 'ms' ? 2 : unit === 'min' ? 6 : 4, lines = Array.from(f.irr, v => nfix(unit === 'ms' ? v * 1000 : unit === 'min' ? v / 60 : v, dp));
   download((fmt === 'csv' ? `rr_interval_${unit}\n` : '') + lines.join('\n') + '\n', fname('filtered_rr_' + unit, fmt), fmt === 'csv' ? 'text/csv' : 'text/plain');
 }
 function sessionObject(withData) {
   const f = ctx.fit, rep = ctx.rep, diag = ctx.diag, dm = ctx.dm;
-  return { spark_session: 3, created: new Date().toISOString(), model: 'M3G (engine 01_model_engine.R)', data: { label: ctx.label, beats: f.dy.length, duration_s: f.time[f.time.length - 1], rr_s: withData ? Array.from(f.dy) : undefined },
-    settings: { priors: ST.get('model.priors'), control: ST.get('model.control'), changed_from_defaults: ST.modelDiff() },
+  return { spark_session: 3, created: new Date().toISOString(), model: 'M3G (engine 01_model_engine.R)', data: { label: ctx.label, beats: f.dy.length, duration_s: f.time[f.time.length - 1], read_as: ctx.read ? { unit: ctx.read.unit, unit_source: ctx.read.unitSource, kind: ctx.read.kind, column: ctx.read.column, delimiter: ctx.read.delimiter, decimal_comma: ctx.read.decimalComma } : 'built-in example', rr_s: withData ? Array.from(f.dy) : undefined },
+    settings: { priors: ST.get('model.priors'), control: ST.get('model.control'), changed_from_app_defaults: ST.modelDiff(), changed_from_r_engine_defaults: ST.modelDiffVsEngine() },
     spectral_anchor: { energy_ratio: f.pr.energy_ratio, p_lf: f.pr.p_lf, p_hf: f.pr.p_hf, nu0_init: f.pr.nu0_init },
     parameters: paramRows(f, rep).map(r => ({ name: r.n, estimate: r.est, se: isFinite(r.se) ? r.se : null, ci95: isFinite(r.lo) ? [r.lo, r.hi] : null, status: r.status })),
     fit: { LL_star: f.LL_star, objective: f.opt ? f.opt.value : null, bfgs_counts: f.opt ? f.opt.counts : null, converged: f.opt ? f.opt.convergence === 0 : null, gate_off: f.params.gate_off, gain_range: [dm.gainMin, dm.gainMax], rr_jitter_ms: f.params.rr_jitter_ms, rmse_ms: dm.rmse, mape_pct: dm.mape, pct_artifact_gated: dm.pctGated },
     posterior: rep ? { sd_ln_tau_s: rep.sd_ln_tau_s, sd_ln_tau_p: rep.sd_ln_tau_p, hessian_eig_range: [rep.min_eig, rep.max_eig] } : null,
     diagnostics: diag ? { n_retained: diag.N, n_total: diag.N_total, ks_D: diag.ks.D, ks_p: diag.ks.p, ks_bound: diag.ks_bound, pacf_violations: diag.pacf_violations, pacf_lags: diag.pacf.length, skew: diag.skew, excess_kurtosis: diag.kurt } : null,
-    hrv: { observed: ctx.hrvObs, filtered: ctx.hrvFlt }, phases: ctx.events ? { events: ctx.events, summary: ctx.phases } : null,
+    hrv: { observed: ctx.bundle ? ctx.bundle.hrvObs : null, filtered: ctx.bundle ? ctx.bundle.hrvFlt : null, per_window: ctx.bundle ? ctx.bundle.phaseHRV : null }, phases: ctx.events ? { source: ctx.events.source, params: ctx.events.params, segments: ctx.events.segments, boundaries: ctx.events.boundaries, summary: ctx.phases } : null,
     summaries: { rmssd_filtered_ms: dm.rmssdFlt, rmssd_observed_ms: dm.rmssdObs, sdnn_filtered_ms: dm.sdnnFlt, mean_epr: dm.mEPR, rms_areal_velocity: dm.rmsArealVel, balance_sd: dm.abiStd } };
 }
 function sessionJSON() { download(JSON.stringify(sessionObject(true), null, 2), fname('session', 'json'), 'application/json'); toast('Saved session JSON', 'ok'); }
 
 /* ---- R script ------------------------------------------------------------------------------------------------------------------------ */
 function rScript() {
-  const f = ctx.fit, diff = ST.modelDiff(), arg = o => Object.keys(o).map(k => { const v = o[k]; return `  ${k} = ${Array.isArray(v) ? 'c(' + v.join(', ') + ')' : v}`; }).join(',\n');
+  const f = ctx.fit, diff = ST.modelDiffVsEngine(), arg = o => Object.keys(o).map(k => { const v = o[k]; return `  ${k} = ${Array.isArray(v) ? 'c(' + v.join(', ') + ')' : v}`; }).join(',\n');
   const rr = Array.from(f.dy, v => String(v)).join(', ');   // full precision: the R fit reproduces the browser fit
   const code = `# SPARK M3G -- reproduces the fit of "${ctx.label}" with the same settings (generated ${new Date().toISOString()})
 # Needs 01_model_engine.R and the packages biwavelet, numDeriv, MASS, ggplot2, patchwork.
@@ -167,7 +183,8 @@ table{border-collapse:collapse;width:100%;font-size:.82rem}th,td{border-bottom:1
 <h2>Parameters</h2><table><thead><tr><th>Parameter</th><th>Estimate</th><th>SE</th><th>95% CI</th><th>Status</th><th>Interpretation</th></tr></thead><tbody>${pr.map(r => `<tr><td>${esc(r.n)}</td><td class="n">${n(r.est, 6)}</td><td class="n">${isFinite(r.se) ? n(r.se, 3) : '—'}</td><td class="n">${isFinite(r.lo) ? '[' + n(r.lo, 4) + ', ' + n(r.hi, 4) + ']' : '—'}</td><td>${esc(r.status)}</td><td>${esc(r.interp)}</td></tr>`).join('')}</tbody></table>
 ${diag ? `<h2>Diagnostics</h2><div class="grid"><div class="k"><span>KS p</span><b>${n(diag.ks.p, 3)}</b></div><div class="k"><span>KS D</span><b>${n(diag.ks.D, 3)}</b></div><div class="k"><span>PACF violations</span><b>${diag.pacf_violations}/${diag.pacf.length}</b></div><div class="k"><span>Beats retained</span><b>${diag.N}/${diag.N_total}</b></div></div>` : ''}
 ${ctx.phases ? `<h2>Phases</h2><table><thead><tr><th>Phase</th><th>Duration (s)</th><th>HR (bpm)</th><th>RMSSD (ms)</th><th>mean x_p</th><th>mean x_s</th><th>Shift (σ)</th></tr></thead><tbody>${ctx.phases.map(r => r.n < 5 ? '' : `<tr><td>${r.name}</td><td class="n">${n(r.duration, 4)}</td><td class="n">${n(r.hr, 4)}</td><td class="n">${n(r.rmssdObs, 3)}</td><td class="n">${n(r.xp, 3)}</td><td class="n">${n(r.xs, 3)}</td><td class="n">${n(r.shift, 3)}</td></tr>`).join('')}</tbody></table>` : ''}
-<h2>HRV statistics</h2><table><thead><tr><th>Metric</th><th>Observed</th><th>Filtered</th></tr></thead><tbody>${[['Mean HR (bpm)', 'meanHR'], ['SDNN (ms)', 'SDNN'], ['RMSSD (ms)', 'RMSSD'], ['pNN50 (%)', 'pNN50'], ['LF (ms²)', 'LF'], ['HF (ms²)', 'HF'], ['LF/HF', 'LFHF']].map(([l, k]) => `<tr><td>${l}</td><td class="n">${n(ctx.hrvObs[k], 4)}</td><td class="n">${n(ctx.hrvFlt[k], 4)}</td></tr>`).join('')}</tbody></table>
+<h2>HRV statistics</h2><table><thead><tr><th>Metric</th><th>Observed</th><th>Filtered</th></tr></thead><tbody>${[['Mean HR (bpm)', 'meanHR'], ['SDNN (ms)', 'SDNN'], ['RMSSD (ms)', 'RMSSD'], ['pNN50 (%)', 'pNN50'], ['LF (ms²)', 'LF'], ['HF (ms²)', 'HF'], ['LF/HF', 'LFHF']].map(([l, k]) => `<tr><td>${l}</td><td class="n">${n(ctx.bundle.hrvObs[k], 4)}</td><td class="n">${n(ctx.bundle.hrvFlt[k], 4)}</td></tr>`).join('')}</tbody></table>
+${ctx.bundle && ctx.bundle.phaseHRV ? `<h2>Conventional statistics per window</h2><table><thead><tr><th>Window</th><th>Signal</th><th>HR</th><th>SDNN</th><th>RMSSD</th><th>pNN50</th><th>LF</th><th>HF</th><th>LF/HF</th></tr></thead><tbody>${ctx.bundle.phaseHRV.filter(r => r.obs).map(r => ['obs', 'flt'].map(k => `<tr><td>${k === 'obs' ? esc(r.name) : ''}</td><td>${k === 'obs' ? 'observed' : 'filtered'}</td><td class="n">${n(r[k].meanHR, 4)}</td><td class="n">${n(r[k].SDNN, 4)}</td><td class="n">${n(r[k].RMSSD, 4)}</td><td class="n">${n(r[k].pNN50, 3)}</td><td class="n">${n(r[k].LF, 4)}</td><td class="n">${n(r[k].HF, 4)}</td><td class="n">${n(r[k].LFHF, 3)}</td></tr>`).join('')).join('')}</tbody></table>` : ''}
 ${X().includeSettings ? `<h2>Model settings</h2><p class="meta">${changed.length ? 'Changed from the engine defaults: <code>' + esc(JSON.stringify(diff)) + '</code>' : 'Engine defaults (M3G).'}</p>` : ''}
 <h2>Charts</h2>${imgs.map(i => `<figure><img src="${i.src}" alt="${esc(i.title)}"><figcaption>${esc(i.title)}</figcaption></figure>`).join('')}
 <p class="meta">Generated by the SPARK browser app. Reproduce with the exported R script (01_model_engine.R).</p></body></html>`;
@@ -177,26 +194,28 @@ ${X().includeSettings ? `<h2>Model settings</h2><p class="meta">${changed.length
 /* ---- menu --------------------------------------------------------------------------------------------------------------------------- */
 function toast(msg, kind) { if (root.SparkApp && root.SparkApp.toast) root.SparkApp.toast(msg, kind); }
 const ITEMS = [
-  ['Images', null],
-  ['Current tab as PNG (all charts, ZIP)', allPNGZip, 'zip'],
-  ['Data', null],
-  ['Parameters with SE and CI', parametersCSV, 'csv'],
-  ['Per-beat table (states, SEs, gain, innovations)', beatsCSV, 'csv'],
-  ['Filtered RR series', () => filteredRR(doc.getElementById('exp-unit') ? doc.getElementById('exp-unit').value : 's', doc.getElementById('exp-fmt') ? doc.getElementById('exp-fmt').value : 'csv'), 'txt/csv'],
-  ['Session', null],
-  ['Full session (settings + results)', sessionJSON, 'json'],
-  ['Self-contained report with charts', reportHTML, 'html'],
-  ['R script reproducing this fit', rScript, 'R']
+  ['Charts', null],
+  ['All charts (PNG images, ZIP)', allPNGZip, 'zip', 'fit'],
+  ['Tables and data', null],
+  ['Parameters with SE and 95% CI', parametersCSV, 'csv', 'fit'],
+  ['Per-beat table (states, gain, innovations)', beatsCSV, 'csv', 'fit'],
+  ['Phases and their summary', phasesCSV, 'csv', 'phases'],
+  ['Conventional statistics per window', phaseHRVCSV, 'csv', 'fit'],
+  ['Filtered RR (unit and format in the sidebar)', () => filteredRR(doc.getElementById('exp-unit') ? doc.getElementById('exp-unit').value : 's', doc.getElementById('exp-fmt') ? doc.getElementById('exp-fmt').value : 'csv'), 'csv / txt', 'fit'],
+  ['Reports and reproducibility', null],
+  ['Self-contained report with charts', reportHTML, 'html', 'fit'],
+  ['Full session (settings + results)', sessionJSON, 'json', 'fit'],
+  ['R script reproducing this fit', rScript, 'R', 'fit']
 ];
 function mountMenu(host) {
   host.innerHTML = ''; host.setAttribute('role', 'menu');
-  ITEMS.forEach(([label, fn, tag]) => {
+  ITEMS.forEach(([label, fn, tag, needs]) => {
     if (!fn) { const h = doc.createElement('h6'); h.textContent = label; host.appendChild(h); return; }
-    const b = doc.createElement('button'); b.setAttribute('role', 'menuitem'); b.innerHTML = `<span>${label}</span><small>${tag}</small>`; b.disabled = true; b.dataset.needs = 'fit';
+    const b = doc.createElement('button'); b.setAttribute('role', 'menuitem'); b.innerHTML = `<span>${label}</span><small>${tag}</small>`; b.disabled = true; b.dataset.needs = needs || 'fit';
     b.addEventListener('click', () => { host.classList.remove('show'); Promise.resolve().then(fn).catch(e => toast(e.message, 'err')); }); host.appendChild(b);
   });
 }
-function setContext(c) { ctx = Object.assign(ctx, c); doc.querySelectorAll('#export-menu button[data-needs="fit"]').forEach(b => { b.disabled = !ctx.fit; }); }
+function setContext(c) { ctx = Object.assign(ctx, c); doc.querySelectorAll('#export-menu button[data-needs]').forEach(b => { b.disabled = b.dataset.needs === 'phases' ? !(ctx.fit && ctx.events) : !ctx.fit; }); }
 
-root.SparkExport = { mountMenu, setContext, chartPNG, renderPNG, allPNGZip, parametersCSV, beatsCSV, filteredRR, sessionJSON, sessionObject, rScript, reportHTML, paramRows, zipStore, crc32, csv, download, fname };
+root.SparkExport = { mountMenu, setContext, chartPNG, renderPNG, allPNGZip, parametersCSV, beatsCSV, filteredRR, sessionJSON, sessionObject, rScript, reportHTML, phasesCSV, phaseHRVCSV, paramRows, zipStore, crc32, csv, download, fname };
 })(typeof window !== 'undefined' ? window : globalThis);

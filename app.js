@@ -5,7 +5,9 @@
 'use strict';
 const doc = root.document, E = root.SparkEngine, ST = root.SparkSettings, C = root.SparkCharts, X = root.SparkExport;
 const $ = id => doc.getElementById(id);
-const S = { rr: null, label: '', events: null, fit: null, rep: null, bundle: null, auto: null, manual: false, running: false };
+const S = { rr: null, label: '', raw: null, read: null, drawn: null, preview: null, truth: null, phaseNote: '', fit: null, rep: null, bundle: null, auto: null, manual: false, running: false };
+const _listeners = {};
+function emit(ev, payload) { (_listeners[ev] || []).slice().forEach(f => { try { f(payload); } catch (e) { console.error(e); } }); }
 const tick = () => new Promise(r => root.requestAnimationFrame ? root.requestAnimationFrame(() => setTimeout(r, 0)) : setTimeout(r, 0));
 const fmt = (x, d) => isFinite(x) ? x.toFixed(d) : '—';
 
@@ -31,8 +33,7 @@ const TABS = ['overview', 'signal', 'autonomic', 'model', 'stats', 'diag'];
 function showTab(tab) {
   doc.querySelectorAll('.tab-btn').forEach(b => { const on = b.dataset.tab === tab; b.classList.toggle('active', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); });
   doc.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
-  C.resizeCharts();                                                  // synchronous: charts get their size at once
-  setTimeout(C.resizeAll, 0);                                         // heavy canvases right after (does not depend on frame callbacks)
+  C.ensureTab(tab);                                                 // builds what is out of date for this tab, one chart per task, after the browser has painted
 }
 doc.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
 const NARROW = () => root.matchMedia ? root.matchMedia('(max-width: 860px)').matches : (root.innerWidth <= 860);
@@ -41,8 +42,7 @@ function setDrawer(open) { $('sidebar').classList.toggle('open', open); $('scrim
 function toggleSidebar() {
   if (NARROW()) { setDrawer(!$('sidebar').classList.contains('open')); return; }
   const collapsed = doc.body.classList.toggle('sb-collapsed'); try { root.localStorage.setItem('spark.sidebar', collapsed ? 'collapsed' : 'open'); } catch (e) { /* ignore */ }
-  $('menu-btn').setAttribute('aria-expanded', collapsed ? 'false' : 'true'); setTimeout(C.resizeAll, 60);
-}
+  $('menu-btn').setAttribute('aria-expanded', collapsed ? 'false' : 'true'); }
 $('menu-btn').onclick = toggleSidebar; $('scrim').onclick = () => setDrawer(false);
 /** The page must not scroll behind a drawer, a modal or a fullscreen chart. */
 function syncScrollLock() {
@@ -67,73 +67,126 @@ dz.addEventListener('drop', ev => { ev.preventDefault(); const f = ev.dataTransf
 $('file-in').onchange = function () { if (this.files[0]) readFile(this.files[0]); this.value = ''; };
 function readFile(f) {
   const r = new root.FileReader();
-  r.onload = e => {
-    const res = E.parseRR(String(e.target.result));
-    if (!res) { showAlert('err', 'Could not parse file — need ≥30 RR values in seconds (0.1–3.0 s) or milliseconds (100–3000 ms).'); return; }
-    setData(res.vals, f.name); showAlert('ok', `Loaded: ${f.name}  (${res.vals.length} beats${res.wasMs ? ' · auto-converted ms → s' : ''})`);
-    if (ST.get('analysis.autoRun')) run();
-  };
+  r.onload = e => loadText(String(e.target.result), f.name);
+  r.onerror = () => showAlert('err', 'Could not read ' + f.name + '.');
   r.readAsText(f);
 }
-$('btn-example').onclick = () => {
-  const ex = E.genExampleSession(); setData(ex.rr, ex.label, ex.events);
-  showAlert('ok', `Example loaded: simulated 5-2-5 recording (5 min rest, 2 min exercise, 5 min recovery; ${ex.rr.length} beats). Click Run Analysis.`); if (ST.get('analysis.autoRun')) run();
-};
-function setData(rr, label, events) {
-  S.rr = rr; S.label = label; S.events = events || null; S.auto = null; S.fit = null; S.rep = null; S.bundle = null; S.manual = false;
-  $('data-chip').classList.add('ok'); $('data-chip-text').textContent = `${label} — ${rr.length} beats · ${rr.reduce((a, b) => a + b, 0).toFixed(1)} s`;
+/** Parse the text of a .txt / .csv file with the chosen time unit (Settings or the Data Input selector; default auto-detect). */
+function loadText(text, name) {
+  const res = E.parseRRDetailed(text, { unit: ST.get('analysis.timeUnit') });
+  S.raw = { text, name };                                          // kept so that changing the unit re-reads the same file
+  if (res.error) { $('unit-detected').textContent = '—'; showAlert('err', `Could not read ${name}: ${res.error}`); return false; }
+  S.read = res; setData(res.vals, name, res);
+  const how = { user: 'chosen by you', header: 'from the column header', auto: 'auto-detected' }[res.unitSource];
+  showAlert('ok', `Loaded ${name}: ${res.nUsed} beats · read as ${E.UNIT_NAME[res.unit]} (${how})${res.kind === 'times' ? ' · beat times → RR' : ''}${res.warnings.length ? ' · ' + res.warnings.join(' ') : ''}`);
+  if (ST.get('analysis.autoRun')) run();
+  return true;
+}
+const syncUnitSelect = () => { $('time-unit').value = ST.get('analysis.timeUnit'); };
+$('time-unit').onchange = () => ST.set('analysis.timeUnit', $('time-unit').value);
+
+$('btn-example').onclick = () => loadExample(E.genExampleSession(), 'simulated 5-2-5 recording (5 min rest, 2 min exercise, 5 min recovery)');
+$('btn-example-multi').onclick = () => loadExample(E.genExampleMulti(), 'simulated recording with two stressors (exercise, then a milder stressor) separated by recoveries');
+function loadExample(ex, what) {
+  setData(ex.rr, ex.label); S.truth = ex.truthBoundaries || (ex.events ? [ex.events.t_on, ex.events.t_off] : null);   // truth is kept for tests only: the app detects the phases itself
+  showAlert('ok', `Example loaded: ${what}, ${ex.rr.length} beats. Click Run Analysis.`); if (ST.get('analysis.autoRun')) run();
+}
+/** A new recording starts clean: windows drawn for the previous one and typed markers (seconds of the previous recording) would not fit it.
+    keepPhases = true only when the same recording is re-estimated (filtered RR). */
+function resetPhasesForNewData(keep) {
+  if (keep) return; const had = !!S.drawn || !!(ST.get('analysis.phaseMarkers') || '').trim();
+  S.drawn = null; S.preview = null; _markerWarned = '';
+  if (ST.get('analysis.phaseMarkers')) ST.set('analysis.phaseMarkers', '', true);
+  if (root.SparkPhaseEditor && root.SparkPhaseEditor.isActive()) root.SparkPhaseEditor.close();
+  if (had) toast('Phase windows and markers of the previous recording were cleared.', '', 3600);
+}
+function setData(rr, label, info, keepPhases) {
+  S.rr = rr; S.label = label; S.truth = null; S.cwt = null; S.hrvObs = null; S.read = info || null; if (!info) S.raw = null; resetPhasesForNewData(keepPhases); S.auto = null; S.fit = null; S.rep = null; S.bundle = null; S.manual = false; _phaseCache = null;
+  $('data-chip').classList.add('ok'); $('data-chip-text').textContent = `${label} — ${rr.length} beats · ${rr.reduce((a, b) => a + b, 0).toFixed(1)} s${info ? ' · ' + info.unit + (info.unitSource === 'auto' ? ' (auto)' : '') : ''}`; $('unit-detected').textContent = info ? info.unit + (info.unitSource === 'auto' ? ' · auto' : info.unitSource === 'header' ? ' · header' : ' · set') : '';
   $('btn-run').disabled = false; $('btn-run-top').disabled = false;
   $('results-wrap').style.display = 'none'; $('empty-state').style.display = 'flex'; $('sim-result').style.display = 'none';
-  X.setContext({ fit: null, label });
+  X.setContext({ fit: null, label, read: info || null }); updatePhasePanel(); emit('data', { label, beats: rr.length });
 }
-/** Phase markers: the user's (Settings → Analysis) when both are set, otherwise those of the loaded example. */
-function effectiveEvents() {
-  const A = ST.get('analysis'); if (A.phaseRest > 0 && A.phaseExercise > A.phaseRest) return { t_on: A.phaseRest, t_off: A.phaseExercise, source: 'settings' };
-  return S.events ? Object.assign({ source: 'example' }, S.events) : null;
+/** Phases of the recording: typed markers win; otherwise automatic detection (unless switched off). Detection uses the observed RR only. */
+let _phaseCache = null, _markerWarned = '';
+function phaseOptions() {
+  const A = ST.get('analysis'), preset = { conservative: [12, 5], standard: [10, 4], sensitive: [8, 4] }[A.phaseSensitivity];
+  return { minShiftBpm: preset ? preset[0] : A.phaseMinShift, minZ: preset ? preset[1] : A.phaseMinZ, minSegmentS: A.phaseMinSegment, maxStressors: A.phaseMaxStressors };
 }
+const dur = () => S.rr.reduce((x, y) => x + y, 0);
+function effectivePhases() {
+  const A = ST.get('analysis'), markers = (A.phaseMarkers || '').trim(); S.phaseNote = '';
+  const win = S.preview || S.drawn;
+  if (win && win.length) { const d = E.phasesFromWindows(win, dur()); if (d) return d; }       // windows drawn on the tachogram win over everything
+  if (markers) {
+    const m = E.phasesFromMarkers(markers, S.rr.reduce((x, y) => x + y, 0));
+    if (m) return m;
+    if (_markerWarned !== markers) { _markerWarned = markers; toast('Phase markers not valid (need increasing seconds within the recording); using automatic detection.', 'warn', 5000); }
+  }
+  if (A.phaseMode === 'off') { S.phaseNote = 'Phase analysis is switched off (Settings → Analysis → Protocol phases).'; return null; }
+  const opts = phaseOptions(), key = JSON.stringify([S.rr.length, S.label, opts]);
+  if (!_phaseCache || _phaseCache.key !== key) _phaseCache = { key, value: E.detectPhases(S.rr, opts) };
+  if (!_phaseCache.value) S.phaseNote = `No phase change was detected (heart-rate changes of at least ${opts.minShiftBpm} bpm with z ≥ ${opts.minZ} and phases of at least ${opts.minSegmentS} s). The recording looks stable at this sensitivity: raise the sensitivity or type protocol times in Settings → Analysis → Protocol phases.`;
+  return _phaseCache.value;
+}
+const mmss = s => { const m = Math.floor(s / 60), r = Math.round(s - m * 60); return m + ':' + String(r === 60 ? 0 : r).padStart(2, '0'); };
 
 /* ---- analysis ------------------------------------------------------------------------------------------------------------------------------ */
 function modelSummary() {
   const d = ST.modelDiff(), n = Object.keys(d.priors).length + Object.keys(d.control).length;
-  $('model-summary').textContent = n ? `Model: M3G with ${n} setting${n > 1 ? 's' : ''} changed from the engine defaults.` : 'Model: M3G, engine defaults.';
+  $('model-summary').textContent = n ? `Model: M3G with ${n} setting${n > 1 ? 's' : ''} changed from the defaults.` : 'Model: M3G, default settings.';
 }
 async function run() {
   if (!S.rr || S.running) return; S.running = true; setDrawer(false);
   $('btn-run').disabled = true; $('btn-run-top').disabled = true; $('prog-outer').style.display = 'block'; ['ok', 'err'].forEach(t => $('alert-' + t).classList.remove('show'));
   try {
     let cfg; try { cfg = ST.modelSettings(); } catch (e) { throw new Error('Model settings: ' + e.message); }
-    setProgress('Extracting Morlet CWT spectral anchor…', 8); await tick();
-    const pr = E.extractSpectralPriors(S.rr, cfg.priors);
-    setProgress('Running 4-D BFGS (M3G: causal vagal gate, γ)…', 25); await tick();
-    const fit = E.fitFromAnchor(S.rr, pr, cfg.control);
-    let rep = null;
-    if (ST.get('analysis.computeSE')) { setProgress('Hessian, standard errors and Laplace posterior…', 62); await tick(); try { rep = E.reportModel(fit); } catch (e) { console.warn('SE failed', e); } }
-    setProgress('Computing statistics and building charts…', 82); await tick();
-    S.fit = fit; S.rep = rep; S.manual = false;
-    S.auto = { ks: fit.params.ks, kp: fit.params.kp, lR: fit.params.lR, lp: fit.params.lp, gamma: fit.params.gamma };
+    const A = ST.get('analysis'); setProgress('Starting…', 3); await tick();
+    C.warmUp();                                                    // the main thread is idle while the worker computes
+    const job = root.SparkCompute.analyze({ rr: S.rr, priors: cfg.priors, control: cfg.control, computeSE: A.computeSE, roll: { window: A.rollWindow, step: A.rollStep }, landscape: landscapeOpts() }, (m, p) => setProgress(m, p));
+    const res = await job.done; S.cwt = null;
+    setProgress('Preparing the results…', 85); await tick();
+    S.fit = res.fit; S.rep = res.rep; S.manual = false;
+    S.auto = { ks: res.fit.params.ks, kp: res.fit.params.kp, lR: res.fit.params.lR, lp: res.fit.params.lp, gamma: res.fit.params.gamma };
     syncSliders(S.auto); $('sim-result').style.display = 'none';
-    renderFit(); showTab('overview');
-    $('empty-state').style.display = 'none'; $('results-wrap').style.display = 'block'; setTimeout(C.resizeAll, 30);
+    renderFit(res, job);
+    showTab('overview');
+    $('empty-state').style.display = 'none'; $('results-wrap').style.display = 'block';
     setProgress('Complete ✓', 100);
-    const p = fit.params;
-    showAlert('ok', `ν₀ = ${(p.nu0 * 60).toFixed(1)} bpm · τ_S = ${(1 / p.ks).toFixed(0)} s · τ_P = ${(1 / p.kp).toFixed(2)} s · γ = ${p.gamma.toFixed(4)}${p.gate_off ? ' (gate off)' : ''} · ${fit.opt.convergence === 0 ? 'converged' : 'max iterations reached'}`);
+    const p = res.fit.params, ph = S.bundle && S.bundle.events, phText = ph ? ` · phases (${ph.source === 'auto' ? 'detected' : ph.source === 'drawn' ? 'drawn' : 'manual'}): ` + ph.segments.map(g => `${g.name} ${mmss(g.from)}–${mmss(g.to)}`).join(', ') : '';
+    showAlert('ok', `ν₀ = ${(p.nu0 * 60).toFixed(1)} bpm · τ_S = ${(1 / p.ks).toFixed(0)} s · τ_P = ${(1 / p.kp).toFixed(2)} s · γ = ${p.gamma.toFixed(4)}${p.gate_off ? ' (gate off)' : ''} · ${res.fit.opt.convergence === 0 ? 'converged' : 'max iterations reached'}${phText}`);
   } catch (e) { setProgress('Error', 0); showAlert('err', 'Analysis failed: ' + e.message); console.error(e); }
   S.running = false; $('btn-run').disabled = false; $('btn-run-top').disabled = false;
+  return S.bundle;
 }
 $('btn-run').onclick = run; $('btn-run-top').onclick = run;
 
-/** Everything derived from a fit that the charts, tables and exports use. */
-function computeBundle(fit, rep) {
-  const A = ST.get('analysis'), dm = E.derivedMetrics(fit), diag = E.innovationDiagnostics(fit);
-  const events = effectiveEvents(), phases = events ? E.phaseSummary(fit, events, dm) : null;
-  return { fit, rep, dm, diag, events, phases, psd: E.hrPSD(fit.dy, fit.irr, fit.time), hrvObs: E.hrvStats(fit.dy, fit.pr), hrvFlt: E.hrvStats(fit.irr, fit.pr), roll: E.rollingStats(fit.time, fit.dy, fit.irr, A.rollWindow, A.rollStep),
-           land: E.stateLandscape(fit.Xp, fit.Xs, dm.sdP_ss, dm.sdS_ss, { nGrid: A.landscapeGrid, bandwidth: A.landscapeBandwidth, minRel: A.minBasin }) };
+const landscapeOpts = () => { const A = ST.get('analysis'); return { nGrid: A.landscapeGrid, bandwidth: A.landscapeBandwidth, minRel: A.minBasin }; };
+/** Everything the charts, tables and exports use. Cheap parts are eager; spectra, HRV tables, rolling statistics, the landscape and the scalogram are computed on first use
+    (or arrive from the worker): a card that is never opened never pays for its data. pre = {dm, diag} when the worker already computed them. */
+function computeBundle(fit, rep, pre) {
+  const events = effectivePhases(), dm = pre ? pre.dm : E.derivedMetrics(fit), diag = pre ? pre.diag : E.innovationDiagnostics(fit), memo = {};
+  const R = { fit, rep, dm, diag, events, phases: events ? E.phaseSummary(fit, events, dm) : null, phaseNote: S.phaseNote, extrasPending: false, extrasReady: Promise.resolve() };
+  const lazy = (name, fn) => Object.defineProperty(R, name, { enumerable: true, configurable: true, get() { if (!(name in memo)) memo[name] = fn(); return memo[name]; } });
+  lazy('phaseHRV', () => E.phaseHRV(fit, R.events, fit.pr));
+  lazy('psd', () => E.hrPSD(fit.dy, fit.irr, fit.time)); lazy('hrvFlt', () => E.hrvStats(fit.irr, fit.pr));
+  lazy('hrvObs', () => (S.hrvObs && S.hrvObs.n === fit.dy.length ? S.hrvObs.v : (S.hrvObs = { n: fit.dy.length, v: E.hrvStats(fit.dy, fit.pr) }).v));
+  lazy('roll', () => { const A = ST.get('analysis'); return E.rollingStats(fit.time, fit.dy, fit.irr, A.rollWindow, A.rollStep); });
+  lazy('land', () => E.stateLandscape(fit.Xp, fit.Xs, dm.sdP_ss, dm.sdS_ss, landscapeOpts()));
+  lazy('cwt', () => (S.cwt && S.cwt.n === fit.dy.length ? S.cwt.v : (S.cwt = { n: fit.dy.length, v: E.cwtDisplay(fit.dy) }).v));           // depends on the data only: reused across manual fits
+  R.reset = names => names.forEach(n => delete memo[n]);
+  R.setExtras = (ex, sig) => { if (!ex) return; ['psd', 'hrvObs', 'hrvFlt', 'cwt'].forEach(k => { if (ex[k] && !(k in memo)) memo[k] = ex[k]; }); if (ex.cwt) S.cwt = { n: fit.dy.length, v: ex.cwt }; if (ex.hrvObs) S.hrvObs = { n: fit.dy.length, v: ex.hrvObs };
+    if (sig === extrasSig()) ['roll', 'land'].forEach(k => { if (ex[k] && !(k in memo)) memo[k] = ex[k]; }); };
+  return R;
 }
-function renderFit() {
+const extrasSig = () => { const A = ST.get('analysis'); return JSON.stringify([A.rollWindow, A.rollStep, landscapeOpts()]); };
+/** Build the bundle for S.fit, update the tables, and mark every chart out of date (the visible tab is rebuilt at once, the others when opened). */
+function renderFit(pre, job) {
   const fit = S.fit; if (!fit) return;
-  S.bundle = computeBundle(fit, S.manual ? null : S.rep);
-  renderTables(S.bundle); C.buildAll(S.bundle);
-  X.setContext({ fit, rep: S.bundle.rep, dm: S.bundle.dm, diag: S.bundle.diag, events: S.bundle.events, phases: S.bundle.phases, hrvObs: S.bundle.hrvObs, hrvFlt: S.bundle.hrvFlt, label: S.label + (S.manual ? '_manual' : '') });
+  const R = S.bundle = computeBundle(fit, S.manual ? null : S.rep, pre);
+  if (job) { const sig = extrasSig(); R.extrasPending = true; R.extrasReady = job.extras.then(ex => { if (S.bundle === R) R.setExtras(ex, sig); R.extrasPending = false; }, () => { R.extrasPending = false; }); }
+  renderTables(R); C.buildAll(R); updatePhasePanel(); emit('result', R);
+  X.setContext({ fit, rep: R.rep, dm: R.dm, diag: R.diag, events: R.events, phases: R.phases, bundle: R, label: S.label + (S.manual ? '_manual' : '') });
 }
 function renderTables(R) {
   const { fit, rep, dm, diag } = R, p = fit.params, f4 = x => isFinite(x) ? Number(x).toPrecision(5) : '—';
@@ -153,6 +206,34 @@ function renderTables(R) {
     chip(dm.pctGated < 5 ? 'pass' : dm.pctGated < 15 ? 'warn' : 'fail', 'Gated beats', fmt(dm.pctGated, 1) + '%') + chip('', 'Fit RMSE', fmt(dm.rmse, 2) + ' ms') + chip('', 'Fit MAPE', fmt(dm.mape, 2) + '%') + chip('', 'Skew / ex. kurtosis', `${fmt(diag.skew, 2)} / ${fmt(diag.kurt, 2)}`)
     : chip('fail', 'Diagnostics', 'too few valid innovations');
 }
+
+/* ---- phase windows drawn on the tachogram -------------------------------------------------------------------------------------------------- */
+/** Replace the phases by windows drawn on the tachogram (null = back to typed markers / automatic detection). */
+function setPhaseWindows(ws) {
+  S.drawn = ws && ws.length ? ws.map(w => ({ kind: w.kind, from: w.from, to: w.to })) : null; S.preview = null; refreshPhases();
+}
+function previewWindows(ws) { S.preview = ws; }
+/** Windows equivalent to what automatic detection finds now (starting point for editing). */
+function detectedWindows() { const d = S.rr ? E.detectPhases(S.rr, phaseOptions()) : null; return d ? d.segments.map(s => ({ kind: s.kind, from: s.from, to: s.to })) : null; }
+function refreshPhases() {
+  if (S.fit && S.bundle) {
+    const R = S.bundle, events = effectivePhases(); R.events = events; R.reset(['phaseHRV']); R.phases = events ? E.phaseSummary(S.fit, events, R.dm) : null; R.phaseNote = S.phaseNote;
+    X.setContext({ events, phases: R.phases }); C.refreshPhases();
+  }
+  updatePhasePanel(); if (root.SparkPhaseEditor) { root.SparkPhaseEditor.render(); } emit('phases', S.bundle && S.bundle.events);
+}
+function updatePhasePanel() {
+  const st = $('phase-status'), list = $('phase-list'), ev = S.bundle && S.bundle.events, have = !!S.fit;
+  $('btn-phase-edit').disabled = !have;
+  if (!S.rr) { st.textContent = 'Load data to detect rest, stress and recovery.'; list.innerHTML = ''; return; }
+  if (!have) { st.textContent = S.drawn ? `${S.drawn.length} window${S.drawn.length > 1 ? 's' : ''} drawn earlier for this recording (applied after the run).` : 'Phases are detected automatically when the analysis runs.'; list.innerHTML = ''; return; }
+  const src = !ev ? null : { auto: 'Detected automatically', manual: 'From typed markers', drawn: 'Drawn by you' }[ev.source];
+  st.textContent = ev ? `${src} · ${ev.segments.length} phase${ev.segments.length > 1 ? 's' : ''}${ev.nStressors ? ' · ' + ev.nStressors + ' stressor' + (ev.nStressors > 1 ? 's' : '') : ''}` : (S.phaseNote ? 'No phase change detected.' : 'No phases.');
+  const cols = ev ? C.segColors(ev) : [];
+  list.innerHTML = ev ? ev.segments.map((s, i) => `<div class="ph-chip"><i class="dot" style="background:${cols[i]}"></i><span>${s.name}</span><small>${mmss(s.from)}–${mmss(s.to)}</small></div>`).join('') : '';
+}
+$('btn-phase-edit').onclick = () => { setDrawer(false); showTab('signal'); const card = doc.querySelector('.cc[data-chart="rr"]'); if (card) card.scrollIntoView({ block: 'start', behavior: 'smooth' }); setTimeout(() => root.SparkPhaseEditor.open(), 120); };
+$('btn-phase-settings').onclick = () => { setDrawer(false); openSettings('phases'); };
 
 /* ---- playground ---------------------------------------------------------------------------------------------------------------------------------- */
 const SL = { ks: 'sl-ks', kp: 'sl-kp', lR: 'sl-lr', lp: 'sl-lp', gamma: 'sl-gm' }, LBL = { ks: 'v-ks', kp: 'v-kp', lR: 'v-lr', lp: 'v-lp', gamma: 'v-gm' };
@@ -177,7 +258,7 @@ function runPlayground(exact) {
   } catch (e) { showAlert('err', 'Manual filter run failed: ' + e.message); console.error(e); }
 }
 $('btn-sim').onclick = () => { if (!S.auto) { showAlert('err', 'Run the main analysis first to obtain MAP-estimated defaults.'); return; } syncSliders(S.auto); runPlayground(S.auto); };
-$('btn-use-filtered').onclick = () => { if (!S.fit) { showAlert('err', 'Run the analysis first to generate a filtered RR series.'); return; } setData(Array.from(S.fit.irr), 'Filtered RR (re-estimation)', S.events); showAlert('ok', 'Filtered RR loaded as new input — click Run Analysis to re-estimate.'); };
+$('btn-use-filtered').onclick = () => { if (!S.fit) { showAlert('err', 'Run the analysis first to generate a filtered RR series.'); return; } setData(Array.from(S.fit.irr), 'Filtered RR (re-estimation)', null, true); showAlert('ok', 'Filtered RR loaded as new input — click Run Analysis to re-estimate.'); };
 $('btn-export-filtered').onclick = () => { if (!S.fit) { showAlert('err', 'Run the analysis first to generate a filtered RR series.'); return; } X.filteredRR($('exp-unit').value, $('exp-fmt').value); };
 
 /* ---- settings, export menu, shortcuts ------------------------------------------------------------------------------------------------------------ */
@@ -194,24 +275,69 @@ doc.addEventListener('keydown', ev => {
   else if (k === 'r') run(); else if (k === 's') { ev.preventDefault(); openSettings(); } else if (k === 'e') { exMenu.classList.toggle('show'); } else if (k === 't') $('theme-btn').click();
   else if (/^[1-6]$/.test(k) && S.fit) showTab(TABS[+k - 1]);
 });
-let _rz; root.addEventListener('resize', () => { clearTimeout(_rz); _rz = setTimeout(C.resizeAll, 90); });
-root.addEventListener('orientationchange', () => { clearTimeout(_rz); _rz = setTimeout(C.resizeAll, 220); });
-doc.querySelectorAll('.panel-hdr').forEach(h => h.addEventListener('click', () => { clearTimeout(_rz); _rz = setTimeout(C.resizeAll, 220); }));
+let _rz; const nudge = ms => { clearTimeout(_rz); _rz = setTimeout(C.resizeAll, ms); };
+root.addEventListener('resize', () => nudge(140)); root.addEventListener('orientationchange', () => nudge(260));
 
 ST.onChange(path => {
-  if (path === '*' || path.startsWith('appearance')) applyAppearance();
-  if (path === '*' || path === 'model' || path.startsWith('model')) modelSummary();
-  if (path === '*' || path.startsWith('appearance') || path.startsWith('charts') || path.startsWith('analysis')) { if (S.fit) { try { renderFit(); } catch (e) { console.error(e); } } }
-  if (path === 'layout' || path === '*') doc.querySelectorAll('.cc').forEach(el => { const l = ST.Layout.get(el.dataset.chart), c = C.CARDS.find(x => x.id === el.dataset.chart); el.dataset.span = String(l.span || c.span || 6); el.querySelector('.cc-body').style.setProperty('--h', (l.h || c.h || 260) + 'px'); });
+  if (path === 'analysis.timeUnit' || path === '*') { syncUnitSelect(); if (S.raw && path === 'analysis.timeUnit') { loadText(S.raw.text, S.raw.name); return; } }
+  if (path === '*' || path.startsWith('appearance')) applyAppearance();                         // CSS only: instant
+  if (path === '*' || path.startsWith('model')) modelSummary();
+  if (path === 'layout' || path === '*') C.applyLayout();
+  if (!S.bundle) return;
+  const R = S.bundle;
+  if (path === '*') { R.reset(['roll', 'land']); refreshPhases(); C.invalidate(); C.ensureTab(); return; }
+  if (path.startsWith('appearance') || path.startsWith('charts')) { C.invalidate(); C.ensureTab(); return; }                    // colours, bands, palette: redraw the visible tab, the others when opened
+  if (/^analysis\.phase/.test(path)) { refreshPhases(); return; }
+  if (path === 'analysis.rollWindow' || path === 'analysis.rollStep') { R.reset(['roll']); C.invalidate(['rolling']); C.ensureTab(); return; }
+  if (/^analysis\.(landscapeGrid|landscapeBandwidth|minBasin)$/.test(path)) { R.reset(['land']); C.invalidate(['landscape']); C.ensureTab(); return; }
+  if (path === 'analysis.showFlow' || path === 'analysis.showBasins') { C.invalidate(['landscape']); C.ensureTab(); return; }
 });
 
 /* ---- start --------------------------------------------------------------------------------------------------------------------------------------------- */
 async function init() {
-  ST.load(); applyAppearance(); await ST.Layout.init(); C.chartDefaults(); C.mountCards(); X.mountMenu(exMenu);
+  ST.load(); try { root.localStorage.removeItem('spark.phasewin'); } catch (e) { /* ignore */ } applyAppearance(); syncUnitSelect(); await ST.Layout.init(); C.chartDefaults(); C.mountCards(); X.mountMenu(exMenu);
+  root.SparkPhaseEditor.init({ getWindows: () => S.preview || S.drawn, setWindows: setPhaseWindows, preview: previewWindows, getDetected: detectedWindows, getPhases: () => S.bundle && S.bundle.events, toast });
   menu = ST.mountMenu($('settings-modal'), { chartList: C.chartList, toast, download: X.download, render: () => {} });
-  modelSummary(); updateSimLabels();
+  modelSummary(); updateSimLabels(); (root.requestIdleCallback || (f => setTimeout(f, 600)))(() => C.warmUp());
   if (!root.Chart) showAlert('err', 'Chart.js could not be loaded (offline?). Calculations still work; charts need the library.');
 }
 const ready = init(); ready.catch(e => console.error(e));
-root.SparkApp = { toast, state: S, run, ready, showTab, runPlayground, renderFit, computeBundle, openSettings, setData };
+/* ============================================================================================================================
+   Public API:  window.SPARK  (documented in README.md, "Scripting API").  SparkApp is kept as an alias of the old, smaller object.
+   ========================================================================================================================== */
+const phaseView = ev => ev ? { source: ev.source, nStressors: ev.nStressors, segments: ev.segments.map(s => ({ name: s.name, kind: s.kind, from: s.from, to: s.to })), boundaries: ev.boundaries || [] } : null;
+root.SPARK = {
+  version: '3.5.0',
+  /** Pure functions without DOM: fitModel, detectPhases, parseRRDetailed, simulateSession, ... */
+  engine: E,
+  settings: ST, charts: C, export: X, editor: root.SparkPhaseEditor,
+  /** Data: load text (.txt/.csv), load RR in seconds, built-in examples. */
+  data: {
+    load: (text, name, opts) => { if (opts && opts.unit) ST.set('analysis.timeUnit', opts.unit, true); return loadText(String(text), name || 'data'); },
+    loadRR: (rrSeconds, label) => { setData(Array.from(rrSeconds), label || 'data'); return true; },
+    example: kind => { if (kind === 'multi') $('btn-example-multi').click(); else $('btn-example').click(); return S.rr ? S.rr.length : 0; },
+    get: () => S.rr ? { rr: S.rr.slice(), label: S.label, read: S.read, duration: dur() } : null
+  },
+  /** Run the analysis; resolves with the result bundle {fit, rep, dm, diag, events, phases, ...} (null if it failed). */
+  run: () => run(),
+  result: () => S.bundle,
+  /** Phases: the current ones, automatic detection, windows, typed markers, mode. */
+  phases: {
+    get: () => phaseView(S.bundle ? S.bundle.events : (S.rr ? effectivePhases() : null)),
+    detect: opts => S.rr ? phaseView(E.detectPhases(S.rr, Object.assign(phaseOptions(), opts || {}))) : null,
+    summary: () => S.bundle ? S.bundle.phases : null,
+    setWindows: ws => { setPhaseWindows(ws); return phaseView(S.bundle && S.bundle.events); },
+    clearWindows: () => { setPhaseWindows(null); return phaseView(S.bundle && S.bundle.events); },
+    windows: () => S.drawn ? S.drawn.map(w => Object.assign({}, w)) : null,
+    setMarkers: str => { ST.set('analysis.phaseMarkers', String(str || '')); return phaseView(S.bundle && S.bundle.events); },
+    setMode: mode => { ST.set('analysis.phaseMode', mode === 'off' ? 'off' : 'auto'); return phaseView(S.bundle && S.bundle.events); },
+    edit: open => { if (open === false) root.SparkPhaseEditor.close(); else { $('btn-phase-edit').click(); } }
+  },
+  /** User interface helpers. */
+  ui: { showTab, openSettings, toast, setTheme: t => ST.set('appearance.theme', t) },
+  /** Events: 'data' (a recording was loaded), 'result' (analysis finished or redrawn), 'phases' (phases changed). */
+  on: (ev, fn) => { (_listeners[ev] = _listeners[ev] || []).push(fn); return () => root.SPARK.off(ev, fn); },
+  off: (ev, fn) => { _listeners[ev] = (_listeners[ev] || []).filter(f => f !== fn); }
+};
+root.SparkApp = { toast, state: S, run, ready, showTab, loadText, runPlayground, renderFit, computeBundle, openSettings, setData };
 })(typeof window !== 'undefined' ? window : globalThis);

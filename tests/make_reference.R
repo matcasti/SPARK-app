@@ -26,15 +26,16 @@ series <- list(
 )
 fixed <- list(kp = 1.0, ks = 0.012, lR = 0.002, gamma = 0.6)
 out <- lapply(series, function(dy) {
-  priors <- spark_priors(); control <- spark_control()
+  priors <- spark_priors(lower_lf_vagal_fraction = 0.5); control <- spark_control()   # the app's default vagal floor (the R engine default is 0.1)
   pr <- extract_spectral_priors(dy, priors, verbose = FALSE)
+  pr01 <- extract_spectral_priors(dy, spark_priors(lower_lf_vagal_fraction = 0.1), verbose = FALSE)   # the R engine's own default, to test the parameter path
   f <- run_gls_filter(dy, fixed$kp, fixed$ks, pr$energy_ratio, fixed$lR, fixed$gamma, control)
   f0 <- run_gls_filter(dy, fixed$kp, fixed$ks, pr$energy_ratio, fixed$lR, 0, control)
   theta <- c(log(0.012), log(0.9), log(0.002), log(0.3))
   fit <- suppressMessages(fit_model(dy, priors, control, verbose = FALSE))
   rep_df <- NULL; invisible(capture.output(rep_df <- report_model(fit)))
   se <- function(name) { v <- suppressWarnings(as.numeric(rep_df$SE[rep_df$Parameter == name])); if (length(v)) v else NA_real_ }
-  list(dy = dy, energy_ratio = pr$energy_ratio, p_lf = pr$p_lf, p_hf = pr$p_hf, nu0_init = pr$nu0_init,
+  list(dy = dy, energy_ratio = pr$energy_ratio, energy_ratio_floor01 = pr01$energy_ratio, p_lf = pr$p_lf, p_hf = pr$p_hf, nu0_init = pr$nu0_init,
        filter = list(params = fixed, LL_star = f$LL_star, nu0 = f$nu0, sig2 = f$sig2, X_p = f$states[, "X_p"], X_s = f$states[, "X_s"], X_p_var = f$states[, "X_p_var"],
                      X_s_var = f$states[, "X_s_var"], rr_var = f$states[, "rr_var"], gain = f$gain, std_innov = f$std_innov, innovations_diagnostic = f$innovations_diagnostic,
                      implied_rr = f$implied_rr, gate_multiplier = f$gate_multiplier),

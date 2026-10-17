@@ -8,7 +8,8 @@
    prior + exponential wall on gamma, a spectral anchor for V_p/V_s from a Morlet CWT, an artifact
    gate and a causal vagal variance gate. The optimizer is R's BFGS (vmmin) so fits agree with fit_model().
    ========================================================================== */
-(function (root) {
+/** The engine is a factory so that the very same source can be started inside a Web Worker (SparkEngineFactory.toString()). */
+function SparkEngineFactory(root) {
 'use strict';
 
 /* ---- numerics ------------------------------------------------------------------------------ */
@@ -102,12 +103,16 @@ function monoSpline(xs, ys) {
 }
 
 /* ---- settings (spark_priors / spark_control) --------------------------------------------------- */
+/* Defaults of the app. They equal the R engine's spark_priors() except lower_lf_vagal_fraction: 0.5 here (the R engine default is 0.1);
+   the exported R script states it explicitly, so results agree. */
 const DEFAULT_PRIORS = {
   tau_p_bounds: [3, 6], tau_s_bounds: [100, 300], ci_coverage: 0.95, topo_target_ratio: 20, topo_prior_weight: 10,
   jitter_bounds_ms: [0.5, 20], gamma_prior_shape: 10, gamma_prior_scale: 0.1, gamma_penalty_threshold: 1, gamma_penalty_rate: 5,
   lf_lower_hz: 0.04, lf_upper_hz: 0.15, hf_upper_hz: 0.40, crossover_hz: 0.10, sns_leakage_at_boundary: 0.05,
-  lower_lf_vagal_fraction: 0.1, cwt_fs: 4
+  lower_lf_vagal_fraction: 0.5, cwt_fs: 4
 };
+/** The R engine's own default for the one setting that differs. */
+const R_ENGINE_PRIOR_DEFAULTS = { lower_lf_vagal_fraction: 0.1 };
 const DEFAULT_CONTROL = {
   jump_threshold: 0.25, jump_power: 10, lik_gate_max: 100, tau_g: 15, zmax: 3, gamma_start: 0.001, lR_start: 0.001,
   kp_gap_floor: 0.05, maxit: 1000, gate_off_threshold: 0.05, diag_gate_max: 1.5, pacf_lag_max: 40
@@ -405,6 +410,14 @@ function fitFromAnchor(dy, pr, ctl) {
   return assembleFit(dy, pr, ctl, thetaToPar(opt.par), opt);
 }
 
+/** Scalogram data for display: log power (Float32 rows, highest frequency first) of the 0.01-0.5 Hz band, with its time span and range. */
+function cwtDisplay(dy) {
+  const fs = 4, g = hrGrid(dy, fs), mu = mean(g.grid), x = Float64Array.from(g.grid, v => v - mu), w = biwaveletMorlet(x, 1 / fs);
+  const keep = w.freqs.map((f, i) => ({ f, i })).filter(o => o.f >= 0.01 && o.f <= 0.50), bFreqs = keep.map(o => o.f), nT = x.length;
+  const rows = keep.map(o => Float32Array.from(w.power[o.i], v => Math.log(v + 1e-10)));
+  let pMin = Infinity, pMax = -Infinity; for (const row of rows) for (let k = 0; k < row.length; k++) { const v = row[k]; if (v < pMin) pMin = v; if (v > pMax) pMax = v; }
+  return { bFreqs, logBPow: rows, nS: bFreqs.length, nT, tMin: g.t0, tMax: g.t0 + (nT - 1) / fs, pMin, pRange: pMax - pMin + 1e-12 };
+}
 /** Final pass at given parameters (also used by the playground). */
 function assembleFit(dy, pr, ctl, par, opt) {
   const Vp = pr.energy_ratio, r = runGLSFilter(dy, par.kp, par.ks, Vp, par.lR, par.gamma, ctl);
@@ -571,15 +584,24 @@ function crossCorr(a, b, maxLag) {
 
 /** Density landscape of the (x_p, x_s) plane in units of the stationary SDs: U = -ln(p / p_max), basins (local maxima), mean flow. */
 function stateLandscape(Xp, Xs, sdP, sdS, opts) {
-  const o = Object.assign({ nGrid: 80, bandwidth: 1, potentialMax: 6, minRel: 0.3, flowBins: 10, flowMin: 4 }, opts || {});
+  const o = Object.assign({ nGrid: 80, bandwidth: 1, potentialMax: 6, minRel: 0.3, flowBins: 12, flowMin: 4 }, opts || {});
   const u = Array.from(Xp, x => x / sdP), v = Array.from(Xs, x => x / sdS), n = u.length;
   const q = (a, p) => { const s = a.slice().sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.max(0, Math.floor(p * (s.length - 1))))]; };
   const pad = a => { const lo = q(a, 0.005), hi = q(a, 0.995), d = (hi - lo) * 0.1 || 1; return [lo - d, hi + d]; };
   const lu = pad(u), lv = pad(v), N = o.nGrid, hu = 1.06 * sd(u) * Math.pow(n, -0.2) * o.bandwidth, hv = 1.06 * sd(v) * Math.pow(n, -0.2) * o.bandwidth;
   const gu = Array.from({ length: N }, (_, i) => lu[0] + (lu[1] - lu[0]) * i / (N - 1)), gv = Array.from({ length: N }, (_, i) => lv[0] + (lv[1] - lv[0]) * i / (N - 1));
-  const Ku = gu.map(g => Float64Array.from(u, x => Math.exp(-0.5 * ((g - x) / hu) ** 2))), Kv = gv.map(g => Float64Array.from(v, x => Math.exp(-0.5 * ((g - x) / hv) ** 2)));
+  // density by linear binning + separable Gaussian smoothing (same kernel as the exact estimate; O(n + N²·K) instead of O(N²·n))
+  const du = (lu[1] - lu[0]) / (N - 1), dv = (lv[1] - lv[0]) / (N - 1), mu = Math.ceil(4 * hu / du), mv = Math.ceil(4 * hv / dv), W = N + 2 * mu, Hh = N + 2 * mv;
+  const C = Array.from({ length: W }, () => new Float64Array(Hh));
+  for (let k = 0; k < n; k++) {
+    const fu = Math.min(Math.max((u[k] - lu[0]) / du + mu, 0), W - 1.0001), fv = Math.min(Math.max((v[k] - lv[0]) / dv + mv, 0), Hh - 1.0001), i0 = Math.floor(fu), j0 = Math.floor(fv), a = fu - i0, b = fv - j0;
+    C[i0][j0] += (1 - a) * (1 - b); C[i0 + 1][j0] += a * (1 - b); C[i0][j0 + 1] += (1 - a) * b; C[i0 + 1][j0 + 1] += a * b;
+  }
+  const wu = Array.from({ length: 2 * mu + 1 }, (_, t) => Math.exp(-0.5 * (((t - mu) * du) / hu) ** 2) / (Math.sqrt(2 * Math.PI) * hu)), wv = Array.from({ length: 2 * mv + 1 }, (_, t) => Math.exp(-0.5 * (((t - mv) * dv) / hv) ** 2) / (Math.sqrt(2 * Math.PI) * hv));
+  const T = Array.from({ length: N }, () => new Float64Array(Hh));                                    // smoothed along u
+  for (let i = 0; i < N; i++) { const out = T[i]; for (let t = 0; t <= 2 * mu; t++) { const row = C[i + t], w = wu[t]; for (let j = 0; j < Hh; j++) out[j] += row[j] * w; } }
   const dens = Array.from({ length: N }, () => new Float64Array(N)); let mx = 0;
-  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) { let s = 0; const a = Ku[i], b = Kv[j]; for (let k = 0; k < n; k++) s += a[k] * b[k]; dens[i][j] = s / (n * 2 * Math.PI * hu * hv); if (dens[i][j] > mx) mx = dens[i][j]; }
+  for (let i = 0; i < N; i++) { const src = T[i], out = dens[i]; for (let j = 0; j < N; j++) { let s = 0; for (let t = 0; t <= 2 * mv; t++) s += src[j + t] * wv[t]; out[j] = s / n; if (out[j] > mx) mx = out[j]; } }
   const pot = dens.map(r => Float64Array.from(r, d => Math.min(-Math.log(Math.max(d, 1e-300) / mx), o.potentialMax)));
   const basins = [];
   for (let i = 1; i < N - 1; i++) for (let j = 1; j < N - 1; j++) {
@@ -621,27 +643,37 @@ function rngFactory(seed) {
   const u = () => { a = (a + 0x6D2B79F5) >>> 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   return { u, n: () => Math.sqrt(-2 * Math.log(u() + 1e-12)) * Math.cos(2 * Math.PI * u()) };
 }
-/** Simulated 5-2-5 recording: 5 min rest, 2 min exercise, 5 min recovery. Two OU drives (vagal-like fast, sympathetic-like slow) plus deterministic
-    exercise offsets (fast vagal withdrawal, slower sympathetic rise, slower recovery of both) drive an integrate-and-fire pacemaker.
-    Parameters are physiological: ~64 bpm at rest, ~140 bpm at the end of exercise, resting RMSSD ~30-40 ms. @return {rr (s), events, truth} */
-function genExampleSession(seed) {
-  const rnd = rngFactory(seed || 525), h = 0.01, T = 720, tOn = 300, tOff = 420;
-  const truth = { nu0: 1.12, kp: 1 / 4, ks: 1 / 150, sdP: 0.075, sdS: 0.035, jitterMs: 6, Ap: 0.50, As: 0.75, tauOnP: 10, tauOnS: 30, tauOffP: 30, tauOffS: 75 };
+/** Simulate a recording with one or several stressors. Two OU drives (vagal-like fast, sympathetic-like slow) plus deterministic offsets per stressor
+    (fast vagal withdrawal, slower sympathetic rise, slower recovery of both) drive an integrate-and-fire pacemaker.
+    spec = {duration, stressors: [{on, off, Ap, As, tauOnP, tauOnS, tauOffP, tauOffS}], base?}  @return {rr (s), truth} */
+function simulateSession(spec, seed) {
+  const rnd = rngFactory(seed || 525), h = 0.01, T = spec.duration;
+  const truth = Object.assign({ nu0: 1.12, kp: 1 / 4, ks: 1 / 150, sdP: 0.075, sdS: 0.035, jitterMs: 6 }, spec.base || {});
   const aP = Math.exp(-truth.kp * h), aS = Math.exp(-truth.ks * h), nP = truth.sdP * Math.sqrt(1 - aP * aP), nS = truth.sdS * Math.sqrt(1 - aS * aS);
   let xp = truth.sdP * rnd.n(), xs = truth.sdS * rnd.n(), phase = 0, tLast = 0;
-  const rr = [], jit = truth.jitterMs / 1000, nSteps = Math.round(T / h);
-  const endP = truth.Ap * (1 - Math.exp(-(tOff - tOn) / truth.tauOnP)), endS = truth.As * (1 - Math.exp(-(tOff - tOn) / truth.tauOnS));
-  const offsets = t => t < tOn ? [0, 0] : t < tOff ? [truth.Ap * (1 - Math.exp(-(t - tOn) / truth.tauOnP)), truth.As * (1 - Math.exp(-(t - tOn) / truth.tauOnS))]
-    : [endP * Math.exp(-(t - tOff) / truth.tauOffP), endS * Math.exp(-(t - tOff) / truth.tauOffS)];
+  const rr = [], jit = truth.jitterMs / 1000, nSteps = Math.round(T / h), st = spec.stressors.map(s => Object.assign({ endP: s.Ap * (1 - Math.exp(-(s.off - s.on) / s.tauOnP)), endS: s.As * (1 - Math.exp(-(s.off - s.on) / s.tauOnS)) }, s));
+  const offsets = t => { let mp = 0, ms = 0; for (const s of st) { if (t < s.on) continue; if (t < s.off) { mp += s.Ap * (1 - Math.exp(-(t - s.on) / s.tauOnP)); ms += s.As * (1 - Math.exp(-(t - s.on) / s.tauOnS)); } else { mp += s.endP * Math.exp(-(t - s.off) / s.tauOffP); ms += s.endS * Math.exp(-(t - s.off) / s.tauOffS); } } return [mp, ms]; };
   for (let k = 1; k <= nSteps; k++) {
     const t = k * h; xp = aP * xp + nP * rnd.n(); xs = aS * xs + nS * rnd.n();
     const [mp, ms] = offsets(t), rate = Math.max(truth.nu0 - xp + mp + xs + ms, 0.3);   // vagal withdrawal (mp > 0) and sympathetic rise (ms > 0) both speed the pacemaker
-    // threshold noise: variance chosen so that the equivalent RR timing jitter is ~truth.jitterMs
     const inc = rate * h + (jit * rate) * Math.sqrt(h) * rnd.n() * 0.5;
     const before = phase; phase += inc;
     if (phase >= 1) { const frac = (1 - before) / inc, tb = t - h + frac * h; rr.push(Math.max(0.3, Math.min(2, tb - tLast))); tLast = tb; phase -= 1; }
   }
-  return { rr, events: { t_on: tOn, t_off: tOff, duration: T }, truth, label: 'Example 5-2-5' };
+  return { rr, truth: Object.assign({}, truth, { stressors: spec.stressors, duration: T }) };
+}
+const EXERCISE = { Ap: 0.50, As: 0.75, tauOnP: 10, tauOnS: 30, tauOffP: 30, tauOffS: 75 };
+/** Built-in 5-2-5 example: 5 min rest, 2 min exercise, 5 min recovery (~64 bpm at rest, ~135 bpm at the end of exercise, resting RMSSD ~30-40 ms). */
+function genExampleSession(seed) {
+  const s = simulateSession({ duration: 720, stressors: [Object.assign({ on: 300, off: 420 }, EXERCISE)] }, seed || 525);
+  return { rr: s.rr, events: { t_on: 300, t_off: 420, duration: 720 }, truth: s.truth, label: 'Example 5-2-5' };
+}
+/** Built-in multi-stressor example: 4 min rest, 2 min exercise, 4 min recovery, 3 min milder stressor (e.g. mental stress), 4 min recovery. */
+function genExampleMulti(seed) {
+  const mild = { Ap: 0.18, As: 0.32, tauOnP: 14, tauOnS: 40, tauOffP: 25, tauOffS: 60 };
+  const stress = [Object.assign({ on: 240, off: 360 }, EXERCISE), Object.assign({ on: 600, off: 780 }, mild)];
+  const s = simulateSession({ duration: 1020, stressors: stress }, seed || 727);
+  return { rr: s.rr, events: null, truth: s.truth, truthBoundaries: [240, 360, 600, 780], label: 'Example multi-stressor' };
 }
 const genExampleRR = () => genExampleSession().rr;
 /** The earlier, highly variable example series (kept so that the R-equivalence reference data can be regenerated). */
@@ -656,31 +688,231 @@ function genLegacyExampleRR(N) {
   }
   return rr;
 }
-/** Per-phase summary of a fit: events = {t_on, t_off} (s from the first beat). Centroids are in units of the stationary SDs of the two drives. */
-function phaseSummary(fit, events, dm) {
-  if (!events || !(events.t_on > 0) || !(events.t_off > events.t_on)) return null;
-  const T = fit.time, N = T.length, tEnd = T[N - 1] + 1e-9, defs = [['Rest', 0, events.t_on], ['Exercise', events.t_on, events.t_off], ['Recovery', events.t_off, tEnd]];
-  const rows = defs.map(([name, a, b]) => {
-    const idx = []; for (let k = 0; k < N; k++) { const t = T[k] - fit.dy[k]; if (t >= a && t < b) idx.push(k); }   // beat start time
-    if (idx.length < 5) return { name, n: idx.length };
-    const pick = arr => idx.map(k => arr[k]), rr = pick(fit.dy), fl = pick(fit.irr), xp = pick(fit.Xp), xs = pick(fit.Xs), g = pick(fit.gain);
-    const rm = x => { let s = 0; for (let i = 1; i < x.length; i++) s += (x[i] - x[i - 1]) ** 2; return 1000 * Math.sqrt(s / (x.length - 1)); };
-    return { name, n: idx.length, from: a, to: Math.min(b, T[N - 1]), duration: Math.min(b, T[N - 1]) - a, hr: 60 / mean(rr), rmssdObs: rm(rr), rmssdFlt: rm(fl), xp: mean(xp), xs: mean(xs), sdXp: sd(xp), sdXs: sd(xs),
-             cu: mean(xp) / dm.sdP_ss, cv: mean(xs) / dm.sdS_ss, gain: mean(g) };
+/* ---- protocol phases: automatic detection, manual markers, per-phase summary --------------------------------------------- */
+const PHASE_DEFAULTS = { binS: 5, minShiftBpm: 10, minSegmentS: 30, maxStressors: 4, minZ: 4, settleS: 30 };
+
+/** Median heart rate (bpm) in bins of binS seconds; bins with fewer than 2 beats are skipped (gaps). @return {t (bin centres), y, n} */
+function hrBins(rr, binS) {
+  const t = []; let acc = 0; for (const d of rr) { acc += d; t.push(acc); }
+  const nb = Math.floor(t[t.length - 1] / binS) + 1, groups = Array.from({ length: nb }, () => []);
+  for (let k = 0; k < t.length; k++) groups[Math.min(nb - 1, Math.floor(t[k] / binS))].push(60 / rr[k]);
+  const out = { t: [], y: [] }; groups.forEach((g, b) => { if (g.length >= 2) { out.t.push((b + 0.5) * binS); out.y.push(median(g)); } });
+  return out;
+}
+/** Exact optimal piecewise-constant segmentation for every K = 1..Kmax at once (dynamic programming, minimum segment length minLen).
+    @return {starts(K) -> first index of each segment, sse(K)} or null when the series is too short */
+function dpSegments(y, Kmax, minLen) {
+  const n = y.length; if (n < minLen) return null; Kmax = Math.min(Kmax, Math.floor(n / minLen));
+  const cs = new Float64Array(n + 1), cs2 = new Float64Array(n + 1); for (let i = 0; i < n; i++) { cs[i + 1] = cs[i] + y[i]; cs2[i + 1] = cs2[i] + y[i] * y[i]; }
+  const cost = (i, j) => { const m = j - i + 1, s = cs[j + 1] - cs[i]; return (cs2[j + 1] - cs2[i]) - s * s / m; };    // sum of squares of y[i..j] about its mean
+  const best = [], arg = [];
+  best[1] = new Float64Array(n).fill(Infinity); arg[1] = new Int32Array(n); for (let j = minLen - 1; j < n; j++) best[1][j] = cost(0, j);
+  for (let k = 2; k <= Kmax; k++) {
+    best[k] = new Float64Array(n).fill(Infinity); arg[k] = new Int32Array(n);
+    for (let j = k * minLen - 1; j < n; j++) { let bv = Infinity, bi = -1; for (let i = (k - 1) * minLen; i <= j - minLen + 1; i++) { const v = best[k - 1][i - 1] + cost(i, j); if (v < bv) { bv = v; bi = i; } } best[k][j] = bv; arg[k][j] = bi; }
+  }
+  return { Kmax, sse: K => best[K][n - 1], starts(K) { const st = new Array(K); let j = n - 1; for (let k = K; k >= 2; k--) { st[k - 1] = arg[k][j]; j = st[k - 1] - 1; } st[0] = 0; return st; } };
+}
+/** Mean, SD and lag-1 autocorrelation of y[i0..i1] after skipping `skip` bins (the transient that follows a change); n_eff discounts autocorrelation
+    (bins of a smooth heart-rate series are far from independent). At least 4 bins are always kept. */
+function segStats(y, i0, i1, skip) {
+  const a = Math.min(i0 + (skip || 0), Math.max(i0, i1 - 3)), n = i1 - a + 1, m = mean(y.slice(a, i1 + 1)); let v = 0, c = 0;
+  for (let i = a; i <= i1; i++) { v += (y[i] - m) ** 2; if (i < i1) c += (y[i] - m) * (y[i + 1] - m); }
+  const s2 = Math.max(v / Math.max(n - 1, 1), 0.25), rho = v > 0 ? Math.min(Math.max(c / v, 0), 0.95) : 0, nEff = Math.max(n * (1 - rho) / (1 + rho), 1.5);
+  return { n, mean: m, s2, nEff };
+}
+/** Detect rest / stressor / recovery phases from heart rate alone, with any number of stressors.
+    1. median HR in bins; 2. optimal piecewise-constant fits with up to 2*maxStressors+1 levels (dynamic programming);
+    3. backward elimination: while any boundary has a level change below minShiftBpm or a z-score below minZ (change / SE with the SE inflated for autocorrelation),
+       remove the weakest boundary and refit; 4. place the surviving boundaries at beat resolution; 5. classify the levels in order: the first level is rest, an upward
+       change starts (or continues) a stressor, a downward change starts (or continues) a recovery.
+    @return {segments [{kind, name, from, to, hr}], boundaries [{t, deltaBpm, z}], nStressors, params, source: 'auto'} or null when no phase change is found. */
+function detectPhases(rr, opts) {
+  const o = Object.assign({}, PHASE_DEFAULTS, opts || {}), N = rr.length; if (N < 40) return null;
+  const T = []; let acc = 0; for (const d of rr) { acc += d; T.push(acc); } const dur = T[N - 1];
+  const binS = Math.max(o.binS, Math.ceil(dur / 500)), hb = hrBins(rr, binS), n = hb.y.length, minLen = Math.max(2, Math.ceil(o.minSegmentS / binS));
+  const dp = dpSegments(hb.y, 2 * o.maxStressors + 1, minLen); if (!dp || n < 2 * minLen) return null;
+  let K = dp.Kmax, starts, stats;
+  const evaluate = st => { const ends = st.map((s, i) => i + 1 < st.length ? st[i + 1] - 1 : n - 1); stats = st.map((s, i) => segStats(hb.y, s, ends[i], i === 0 ? 0 : Math.ceil(o.settleS / binS)));
+    return st.slice(1).map((s, i) => { const A = stats[i], B = stats[i + 1], d = B.mean - A.mean, z = Math.abs(d) / Math.sqrt(A.s2 / A.nEff + B.s2 / B.nEff); return { idx: s, delta: d, z }; }); };
+  let bounds;
+  for (;;) { starts = dp.starts(K); bounds = evaluate(starts); const weak = bounds.map((b, i) => ({ i, bad: Math.abs(b.delta) < o.minShiftBpm || b.z < o.minZ, z: b.z })).filter(x => x.bad);
+    if (!weak.length || K === 1) break; K -= 1; }            // fewer levels, re-optimized; terminates at K = 1
+  if (K === 1) return null;
+  // boundary times at beat resolution: minimize the squared error of a two-level step on 3-beat running-median HR
+  const hrBeat = rr.map((d, k) => 60 / d), hr3 = hrBeat.map((v, k) => median(hrBeat.slice(Math.max(0, k - 1), k + 2)));
+  const mid = bounds.map(b => (hb.t[b.idx - 1] + hb.t[b.idx]) / 2), hr5 = hrBeat.map((v, k) => median(hrBeat.slice(Math.max(0, k - 2), k + 3))), hr9 = hrBeat.map((v, k) => median(hrBeat.slice(Math.max(0, k - 4), k + 5)));
+  const nearest = t => { let lo = 0, hi = N - 1; while (lo < hi) { const m = (lo + hi) >> 1; T[m] < t ? lo = m + 1 : hi = m; } return lo; };
+  const times = [];
+  bounds.forEach((b, i) => {
+    const prev = i > 0 ? times[i - 1] + o.minSegmentS / 2 : 0, nextMid = i + 1 < mid.length ? mid[i + 1] - o.minSegmentS / 2 : dur;
+    // the step position at beat resolution, searched around the level change
+    const w0 = Math.max(prev, mid[i] - 1.5 * binS), w1 = Math.min(nextMid, mid[i] + 1.5 * binS), mA = stats[i].mean, mB = stats[i + 1].mean; let tb = mid[i], bv = Infinity;
+    for (let k = 0; k < N; k++) { if (T[k] < w0 || T[k] > w1) continue; let sse = 0; for (let j = Math.max(0, k - 30); j < Math.min(N, k + 30); j++) sse += (hr3[j] - (T[j] <= T[k] ? mA : mB)) ** 2; if (sse < bv) { bv = sse; tb = T[k]; } }
+    if (b.delta > 0) {          // onset of a stressor: where heart rate leaves the previous plateau (a step fit would sit half-way up the rise)
+      const A = stats[i], thr = A.mean + Math.max(2 * Math.sqrt(A.s2), 0.2 * b.delta); let k = nearest(tb); while (k > 0 && hr5[k] > thr && T[k] > prev) k--; tb = T[k];
+    } else if (i > 0 && bounds[i - 1].delta > 0) {        // end of a stressor: the last moment heart rate is still near its plateau, i.e. where the decline begins
+      const lvl = stats[i].mean, thr = lvl - Math.max(0.15 * (lvl - stats[i + 1].mean), 1.5 * Math.sqrt(stats[i].s2)), lo = nearest(Math.max(prev, times[i - 1])); let k = nearest(Math.min(nextMid, tb + binS)); while (k > lo && hr9[k] < thr) k--; tb = T[k];
+    }
+    times.push(Math.max(tb, prev));
   });
-  const ref = rows[0]; rows.forEach(r => { r.shift = (r.cu != null && ref.cu != null) ? Math.hypot(r.cu - ref.cu, r.cv - ref.cv) : NaN; });
+  // levels -> phases
+  const levels = starts.map((s, i) => ({ from: i === 0 ? 0 : times[i - 1], to: i + 1 < starts.length ? times[i] : dur, hr: stats[i].mean }));
+  const segs = [{ kind: 'rest', from: levels[0].from, to: levels[0].to, hr: levels[0].hr }];
+  for (let i = 1; i < levels.length; i++) {
+    const up = bounds[i - 1].delta > 0, last = segs[segs.length - 1], kind = up ? 'stressor' : 'recovery';
+    if (last.kind === kind) { const w0 = last.to - last.from, w1 = levels[i].to - levels[i].from; last.hr = (last.hr * w0 + levels[i].hr * w1) / (w0 + w1); last.to = levels[i].to; last.peakHr = up ? Math.max(last.peakHr || last.hr, levels[i].hr) : undefined; }
+    else segs.push({ kind, from: levels[i].from, to: levels[i].to, hr: levels[i].hr });
+  }
+  nameSegments(segs);
+  return { segments: segs, boundaries: bounds.map((b, i) => ({ t: times[i], deltaBpm: b.delta, z: b.z })), nStressors: segs.filter(s => s.kind === 'stressor').length, params: o, source: 'auto' };
+}
+/** "Rest" / "Rest 1, 2…", "Stressor" / "Stressor 1, 2…", "Recovery" / "Recovery 1, 2…" (numbered only when there is more than one of a kind). */
+function nameSegments(segs) {
+  const label = { rest: 'Rest', stressor: 'Stressor', recovery: 'Recovery' }, total = {}, seen = {};
+  segs.forEach(s => { total[s.kind] = (total[s.kind] || 0) + 1; });
+  segs.forEach(s => { seen[s.kind] = (seen[s.kind] || 0) + 1; s.name = label[s.kind] + (total[s.kind] > 1 ? ' ' + seen[s.kind] : ''); });
+  return segs;
+}
+/** Manual markers: seconds from the first beat, increasing: [end of rest = start of stressor 1, end of stressor 1, start of stressor 2, end of stressor 2, ...].
+    A string such as "300, 420, 900, 1020" is accepted. @return phases in the same form as detectPhases() (source 'manual') or null if invalid. */
+function phasesFromMarkers(markers, duration) {
+  const m = (typeof markers === 'string' ? markers.split(/[\s,;]+/).filter(Boolean).map(Number) : markers.slice());
+  if (m.length < 2 || m.some(v => !isFinite(v) || v <= 0) || m.some((v, i) => i > 0 && v <= m[i - 1]) || (duration && m[0] >= duration)) return null;
+  const segs = [{ kind: 'rest', from: 0, to: m[0] }];
+  m.forEach((t, i) => { const end = i + 1 < m.length ? m[i + 1] : duration || t + 1; segs.push({ kind: i % 2 === 0 ? 'stressor' : 'recovery', from: t, to: end }); });
+  if (segs[segs.length - 1].to <= segs[segs.length - 1].from) segs.pop();
+  nameSegments(segs);
+  return { segments: segs, boundaries: m.map(t => ({ t })), nStressors: segs.filter(s => s.kind === 'stressor').length, params: null, source: 'manual' };
+}
+/** Phases from windows chosen by the user (e.g. drawn on the tachogram): [{kind: 'rest' | 'stressor' | 'recovery', from, to}] in seconds from the first beat.
+    Windows are clipped to the recording, sorted, and must not overlap; gaps between windows are allowed (those beats belong to no phase). Windows shorter than 5 s are dropped.
+    @return phases in the same form as detectPhases() (source 'drawn') or null when there is no valid window. */
+function phasesFromWindows(windows, duration) {
+  const ok = (windows || []).filter(w => w && ['rest', 'stressor', 'recovery'].includes(w.kind) && isFinite(w.from) && isFinite(w.to)).map(w => ({ kind: w.kind, from: Math.max(0, Math.min(w.from, w.to)), to: Math.min(duration || Infinity, Math.max(w.from, w.to)) }))
+    .filter(w => w.to - w.from >= 5).sort((a, b) => a.from - b.from);
+  if (!ok.length || ok.some((w, i) => i > 0 && w.from < ok[i - 1].to - 1e-9)) return null;
+  const segs = ok.map(w => ({ kind: w.kind, from: w.from, to: w.to })); nameSegments(segs);
+  return { segments: segs, boundaries: segs.slice(1).map(s => ({ t: s.from })), nStressors: segs.filter(s => s.kind === 'stressor').length, params: null, source: 'drawn' };
+}
+/** Insert a window into a list of windows like painting: the new window wins, overlapped windows are trimmed (or split) and pieces under 5 s are dropped. */
+function paintWindow(windows, w) {
+  const out = []; (windows || []).forEach(o => {
+    if (o.to <= w.from || o.from >= w.to) { out.push({ kind: o.kind, from: o.from, to: o.to }); return; }
+    if (o.from < w.from) out.push({ kind: o.kind, from: o.from, to: w.from }); if (o.to > w.to) out.push({ kind: o.kind, from: w.to, to: o.to }); });
+  out.push({ kind: w.kind, from: w.from, to: w.to });
+  return out.filter(x => x.to - x.from >= 5).sort((a, b) => a.from - b.from);
+}
+/** Conventional HRV statistics of the observed and of the model-filtered RR in each phase window, plus the whole recording as a reference row.
+    phases = {segments} or null. A beat belongs to the window in which it starts. LF, HF and LF/HF need at least 2 min of data (NaN otherwise). */
+function phaseHRV(fit, phases, priors) {
+  const T = fit.time, N = T.length, end = T[N - 1] + 1e-9, pr = priors || fit.pr;
+  const one = (name, kind, a, b) => {
+    const idx = []; for (let k = 0; k < N; k++) { const t0 = T[k] - fit.dy[k]; if (t0 >= a && t0 < b) idx.push(k); }
+    const row = { name, kind, from: a, to: Math.min(b, T[N - 1]), n: idx.length }; if (idx.length < 8) return row;
+    const o = idx.map(k => fit.dy[k]), f = idx.map(k => fit.irr[k]); row.duration = sum(o); row.obs = hrvStats(o, pr); row.flt = hrvStats(f, pr); return row;
+  };
+  const rows = [one('Whole recording', 'all', 0, end)];
+  if (phases && phases.segments) phases.segments.forEach(s => rows.push(one(s.name, s.kind, s.from, Math.min(s.to, end))));
   return rows;
 }
-function parseRR(txt) {
-  const raw = txt.trim().split(/[\n\r,;\t ]+/).map(s => parseFloat(s.trim())).filter(v => isFinite(v) && v > 0);
-  if (!raw.length) return null;
-  const wasMs = median(raw) > 3, vals = raw.map(v => wasMs ? v / 1000 : v).filter(v => v > 0.1 && v < 3.0);
-  return vals.length >= 30 ? { vals, wasMs } : null;
+/** Per-phase summary of a fit. `phases` = {segments}. Centroids are in units of the stationary SDs of the two drives; shift is the distance from the first (rest) centroid. */
+function phaseSummary(fit, phases, dm) {
+  if (!phases || !phases.segments || phases.segments.length < 1) return null;
+  const T = fit.time, N = T.length, tEnd = T[N - 1] + 1e-9;
+  const rows = phases.segments.map(seg => {
+    const a = seg.from, b = Math.min(seg.to, tEnd), idx = []; for (let k = 0; k < N; k++) { const t0 = T[k] - fit.dy[k]; if (t0 >= a && t0 < b) idx.push(k); }
+    if (idx.length < 5) return { name: seg.name, kind: seg.kind, n: idx.length };
+    const pick = arr => idx.map(k => arr[k]), rr = pick(fit.dy), fl = pick(fit.irr), xp = pick(fit.Xp), xs = pick(fit.Xs), g = pick(fit.gain);
+    const rm = x => { let s = 0; for (let i = 1; i < x.length; i++) s += (x[i] - x[i - 1]) ** 2; return 1000 * Math.sqrt(s / (x.length - 1)); };
+    return { name: seg.name, kind: seg.kind, n: idx.length, from: a, to: Math.min(b, T[N - 1]), duration: Math.min(b, T[N - 1]) - a, hr: 60 / mean(rr), rmssdObs: rm(rr), rmssdFlt: rm(fl), xp: mean(xp), xs: mean(xs), sdXp: sd(xp), sdXs: sd(xs),
+             cu: mean(xp) / dm.sdP_ss, cv: mean(xs) / dm.sdS_ss, gain: mean(g) };
+  });
+  const ref = rows.find(r => r.kind === 'rest' && r.cu != null) || rows.find(r => r.cu != null) || rows[0]; rows.forEach(r => { r.shift = (r.cu != null && ref.cu != null) ? Math.hypot(r.cu - ref.cu, r.cv - ref.cv) : NaN; });
+  return rows;
 }
+/* ---- reading RR data (.txt / .csv) -------------------------------------------------------------------------------------- */
+const UNIT_FACTOR = { ms: 0.001, s: 1, min: 60 }, UNIT_NAME = { ms: 'milliseconds', s: 'seconds', min: 'minutes' };
+const RR_RANGE_S = [0.1, 3.0];                                    // plausible RR intervals (s) after conversion
+const isMono = a => { const f = a.filter(isFinite); if (f.length < 30) return false; let up = 0; for (let i = 1; i < f.length; i++) if (f[i] > f[i - 1]) up++; return up / (f.length - 1) >= 0.98; };
+function splitCSVLine(line, delim) {
+  if (delim === '') return [line.trim()];
+  if (delim === ' ') return line.trim().split(/\s+/);
+  const out = []; let cur = '', q = false;
+  for (let i = 0; i < line.length; i++) { const ch = line[i]; if (ch === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; } else if (ch === delim && !q) { out.push(cur); cur = ''; } else cur += ch; }
+  out.push(cur); return out.map(s => s.trim().replace(/^"|"$/g, '').trim());
+}
+const toNum = s => { if (s == null) return NaN; const t = String(s).trim(); return /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(t) ? parseFloat(t) : NaN; };
+/** Time unit of a series from its median magnitude: seconds 0.15-4, milliseconds 120-4000, minutes 0.0025-0.07; null when ambiguous. */
+function guessUnit(m) { if (m >= 0.15 && m <= 4) return 's'; if (m >= 120 && m <= 4000) return 'ms'; if (m >= 0.0025 && m < 0.07) return 'min'; return null; }
+function unitFromHeader(name) {
+  const n = String(name || '').toLowerCase();
+  if (/\bms\b|millisec|\(msec\)|_ms\b|\[ms\]/.test(n)) return 'ms'; if (/\bmin(ute)?s?\b|\(min\)|_min\b|\[min\]/.test(n)) return 'min'; if (/\(s\)|\bsec(ond)?s?\b|_s\b|\[s\]/.test(n)) return 's'; return null;
+}
+/** Read RR intervals from the text of a .txt or .csv file.
+    Accepts: one value per line; delimiter , ; tab or spaces; decimal point or comma; a header row (also with unit hints such as "RR (ms)"); several columns
+    (the RR column is chosen by header name, else the first column that is not monotonic; a monotonic column is read as beat times and differenced); comment lines (#).
+    opts.unit: 'auto' (default), 'ms', 's' or 'min'.
+    @return {vals (seconds), unit, unitSource ('user' | 'header' | 'auto'), kind ('rr' | 'times'), column {index, name}, delimiter, decimalComma, nRaw, nUsed, nDropped, warnings}
+            or {error} with a message that says what to try. */
+function parseRRDetailed(text, opts) {
+  const want = (opts && opts.unit) || 'auto', warnings = [];
+  const lines = String(text).replace(/^\uFEFF/, '').split(/\r\n|\r|\n/).map(l => l.trim()).filter(l => l && !/^(#|\/\/)/.test(l));
+  if (lines.length < 30) return { error: 'The file has fewer than 30 data lines (' + lines.length + ').' };
+  // delimiter: the candidate that gives a consistent number of fields > 1; otherwise a single column
+  const sample = lines.slice(0, 60); let delim = '', singleDecimalComma = false;
+  // a single column of decimal commas ("0,85"): every line is d,ddd with the same few integer parts (a row counter in a csv would vary widely)
+  { const m = sample.map(l => /^-?(\d{1,2}),\d{2,}$/.exec(l)); if (m.every(Boolean) && new Set(m.map(x => x[1])).size <= 6) singleDecimalComma = true; }
+  for (const d of singleDecimalComma ? [] : [';', '\t', ',', ' ']) { const counts = sample.map(l => splitCSVLine(l, d).length), mode = counts.sort((a, b) => a - b)[Math.floor(counts.length / 2)]; if (mode > 1 && counts.filter(c => c === mode).length / counts.length >= 0.8) { delim = d; break; } }
+  // decimal comma: "0,85" in a single column, or inside fields of ; / tab separated files
+  let decimalComma = false;
+  if (singleDecimalComma) decimalComma = true;
+  else if (delim !== '' && delim !== ',') decimalComma = sample.join(' ').match(/(^|[\s;\t])-?\d+,\d+(?=[\s;\t]|$)/g) !== null;
+  const rows = lines.map(l => splitCSVLine(l, delim).map(s => decimalComma ? s.replace(/^(-?\d+),(\d+)$/, '$1.$2') : s));
+  // header: first row that is mostly non-numeric
+  let header = null; const ncol = Math.max(...rows.slice(0, 60).map(r => r.length));
+  if (rows[0].some(c => c !== '' && !isFinite(toNum(c))) && rows.length > 1 && rows[1].filter(c => isFinite(toNum(c))).length >= Math.max(1, rows[1].length - 1)) { header = rows.shift(); }
+  const cols = Array.from({ length: ncol }, (_, i) => ({ index: i, name: header ? (header[i] || '') : '', vals: rows.map(r => toNum(r[i])) }));
+  const numeric = cols.filter(c => c.vals.filter(isFinite).length >= 0.8 * rows.length);
+  if (!numeric.length) return { error: 'No numeric column was found. Expected one RR value per line, or a table with an RR column.' };
+  numeric.forEach(c => { c.mono = isMono(c.vals); });
+  // which column, and is it RR intervals or beat times?
+  const rrName = /^(rr|rri|ibi|nn|nni|rr[\s_-]?int\w*|inter[\s_-]?beat\w*|interval\w*|rr\W.*|ibi\W.*|nn\W.*)$/i, timeName = /^(time|t|timestamp|beat[\s_-]?time\w*|sec\w*|seconds|tm|clock|cumulative\w*|r[\s_-]?peak\w*)(\W.*)?$/i;
+  let pick = numeric.find(c => rrName.test(c.name) && !c.mono), kind = 'rr';
+  if (!pick) { const nm = numeric.find(c => !c.mono && !timeName.test(c.name)); if (nm) pick = nm; }
+  if (!pick) {      // only monotonic columns: skip row counters (0,1,2,... or 1,2,3,...), prefer a column named like a time
+    const isCounter = c => { const f = c.vals.filter(isFinite); return f.every((v, i) => i === 0 || Math.abs(v - f[i - 1] - 1) < 1e-9); };
+    const tms = numeric.filter(c => c.mono && !isCounter(c)), tm = tms.find(c => timeName.test(c.name)) || tms[0] || numeric.find(c => c.mono);
+    if (tm) { pick = tm; kind = 'times'; }
+  }
+  if (!pick) pick = numeric[0];
+  if (numeric.length > 1) warnings.push(`Used column ${pick.index + 1}${pick.name ? ' “' + pick.name + '”' : ''} of ${numeric.length} numeric columns.`);
+  let raw = pick.vals.filter(isFinite);
+  if (kind === 'times') { const d = []; for (let i = 1; i < raw.length; i++) d.push(raw[i] - raw[i - 1]); raw = d.filter(v => v > 0); warnings.push('The column increases steadily, so it was read as beat times and converted to RR intervals.'); }
+  else raw = raw.filter(v => v > 0);
+  if (raw.length < 30) return { error: 'Fewer than 30 positive values in the selected column.' };
+  // unit: user choice > header hint > magnitude
+  const med = median(raw); let unit, source;
+  if (want !== 'auto') { unit = want; source = 'user'; }
+  else { const h = unitFromHeader(pick.name); if (h) { unit = h; source = 'header'; } else { unit = guessUnit(med); source = 'auto'; } }
+  if (!unit) return { error: `Could not tell the time unit: the typical value is ${med.toPrecision(3)}, which is not a plausible RR interval in milliseconds (150–3500), seconds (0.2–3.5) or minutes (0.004–0.06). Choose the unit manually.`, median: med };
+  const f = UNIT_FACTOR[unit], all = raw.map(v => v * f), vals = all.filter(v => v >= RR_RANGE_S[0] && v <= RR_RANGE_S[1]), dropped = all.length - vals.length;
+  if (vals.length < 30 || vals.length < 0.5 * all.length) return { error: `Read as ${UNIT_NAME[unit]}, only ${vals.length} of ${all.length} values are plausible RR intervals (0.1–3 s).` + (want !== 'auto' ? ' Check the selected time unit, or set it to Auto-detect.' : ' Select the unit manually.'), unit, median: med };
+  if (dropped) warnings.push(`${dropped} value${dropped > 1 ? 's' : ''} outside 0.1–3 s ignored.`);
+  if (decimalComma) warnings.push('Decimal comma recognised.');
+  return { vals, unit, unitSource: source, kind, column: { index: pick.index, name: pick.name }, delimiter: delim === '' ? 'single column' : delim === '\t' ? 'tab' : delim === ' ' ? 'space' : delim, decimalComma, nRaw: rows.length, nUsed: vals.length, nDropped: dropped, warnings, wasMs: unit === 'ms' };
+}
+/** Backward-compatible wrapper: the parse result, or null when the data cannot be read. */
+function parseRR(txt, opts) { const r = parseRRDetailed(txt, opts); return r.error ? null : r; }
 
-const API = { fftCore, pow2, mean, median, sd, pnorm, qnorm, makeSpline, monoSpline, DEFAULT_PRIORS, DEFAULT_CONTROL, sparkPriors, sparkControl, biwaveletMorlet, hrGrid,
+const API = { fftCore, pow2, mean, median, sd, pnorm, qnorm, makeSpline, monoSpline, DEFAULT_PRIORS, R_ENGINE_PRIOR_DEFAULTS, DEFAULT_CONTROL, sparkPriors, sparkControl, biwaveletMorlet, hrGrid,
   extractSpectralPriors, ouBlock, artifactGate, runGLSFilter, thetaToPar, parToTheta, logPriorTerms, objectiveMap, bfgsR, fitModel, fitFromAnchor, assembleFit, runManualFit,
-  numHessian, eigenSym, pinv, reportModel, pacf, acf, ksUniform, innovationDiagnostics, derivedMetrics, hrvStats, rollingStats, crossCorr, stateLandscape, computePSD, hrPSD, genExampleSession, genExampleRR, genLegacyExampleRR, phaseSummary, parseRR };
+  numHessian, eigenSym, pinv, reportModel, pacf, acf, ksUniform, innovationDiagnostics, derivedMetrics, hrvStats, rollingStats, crossCorr, stateLandscape, computePSD, hrPSD, cwtDisplay, simulateSession, genExampleSession, genExampleMulti, genExampleRR, genLegacyExampleRR, detectPhases, phasesFromMarkers, phasesFromWindows, paintWindow, phaseSummary, phaseHRV, parseRR, parseRRDetailed, guessUnit, UNIT_FACTOR, UNIT_NAME };
 root.SparkEngine = API;
-if (typeof module !== 'undefined' && module.exports) module.exports = API;
-})(typeof window !== 'undefined' ? window : globalThis);
+return API;
+}
+(function () {
+  const root = typeof window !== 'undefined' ? window : globalThis, api = SparkEngineFactory(root);
+  root.SparkEngineFactory = SparkEngineFactory;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})();

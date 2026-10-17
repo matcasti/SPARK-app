@@ -10,7 +10,7 @@ const DEFAULTS = {
   appearance: { theme: 'auto', accent: 'blue', density: 'comfortable', fontScale: 1, reduceMotion: false },
   charts: { colorP: '', colorS: '', lineWidth: 1.6, showCI: true, showGrid: true, maxPoints: 3000, palette: 'inferno', hidden: {} },
   model: { priors: JSON.parse(JSON.stringify(E.DEFAULT_PRIORS)), control: JSON.parse(JSON.stringify(E.DEFAULT_CONTROL)) },
-  analysis: { autoRun: false, computeSE: true, phaseRest: 0, phaseExercise: 0, rollWindow: 60, rollStep: 10, landscapeGrid: 80, landscapeBandwidth: 1, showFlow: true, showBasins: true, minBasin: 0.3 },
+  analysis: { timeUnit: 'auto', autoRun: false, computeSE: true, phaseMode: 'auto', phaseMarkers: '', phaseSensitivity: 'standard', phaseMinShift: 10, phaseMinZ: 4, phaseMinSegment: 30, phaseMaxStressors: 4, rollWindow: 60, rollStep: 10, landscapeGrid: 80, landscapeBandwidth: 1, showFlow: true, showBasins: true, minBasin: 0.3 },
   export: { scale: 2, background: 'theme', prefix: 'spark', decimal: '.', separator: ',', includeSettings: true }
 };
 const ACCENTS = { blue: ['#5B9CFF', '#2563EB'], teal: ['#2DD4D4', '#0E9AA7'], violet: ['#A78BFA', '#6D4FD1'], amber: ['#F5B84B', '#C98A12'], green: ['#3DDC97', '#169C62'] };
@@ -32,8 +32,19 @@ const getPath = (o, p) => p.split('.').reduce((a, k) => (a == null ? a : a[k]), 
 function setPath(o, p, v) { const ks = p.split('.'); let t = o; for (let i = 0; i < ks.length - 1; i++) t = t[ks[i]]; t[ks[ks.length - 1]] = v; }
 
 let state = clone(DEFAULTS); const listeners = [];
-function load() { try { const raw = root.localStorage && root.localStorage.getItem(KEY); if (raw) state = merge(DEFAULTS, JSON.parse(raw)); } catch (e) { state = clone(DEFAULTS); } return state; }
-function save() { try { root.localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* private mode: keep in memory */ } }
+const VERSION = 4;
+function load() {
+  try {
+    const raw = root.localStorage && root.localStorage.getItem(KEY);
+    if (raw) {
+      const saved = JSON.parse(raw); state = merge(DEFAULTS, saved);
+      // v4: the default vagal floor changed from 0.1 to 0.5; a value saved by an earlier version is the old default, not a choice
+      if (!saved._v || saved._v < 4) { if (state.model.priors.lower_lf_vagal_fraction === 0.1) state.model.priors.lower_lf_vagal_fraction = DEFAULTS.model.priors.lower_lf_vagal_fraction; }
+    }
+  } catch (e) { state = clone(DEFAULTS); }
+  return state;
+}
+function save() { try { root.localStorage.setItem(KEY, JSON.stringify(Object.assign({ _v: VERSION }, state))); } catch (e) { /* private mode: keep in memory */ } }
 function emit(path) { listeners.forEach(f => { try { f(path, state); } catch (e) { console.error(e); } }); }
 const S = {
   DEFAULTS, ACCENTS, PALETTES,
@@ -49,6 +60,12 @@ const S = {
   modelDiff() {
     const d = { priors: {}, control: {} };
     ['priors', 'control'].forEach(g => Object.keys(DEFAULTS.model[g]).forEach(k => { if (JSON.stringify(state.model[g][k]) !== JSON.stringify(DEFAULTS.model[g][k])) d[g][k] = state.model[g][k]; }));
+    return d;
+  },
+  /** Settings that differ from the R ENGINE's own defaults: what an R script must state explicitly to reproduce the app (the app's vagal floor default is 0.5, R's is 0.1). */
+  modelDiffVsEngine() {
+    const rDef = { priors: Object.assign(clone(DEFAULTS.model.priors), E.R_ENGINE_PRIOR_DEFAULTS), control: clone(DEFAULTS.model.control) }, d = { priors: {}, control: {} };
+    ['priors', 'control'].forEach(g => Object.keys(rDef[g]).forEach(k => { if (JSON.stringify(state.model[g][k]) !== JSON.stringify(rDef[g][k])) d[g][k] = state.model[g][k]; }));
     return d;
   },
   /** Colour of the vagal-like (P) and sympathetic-like (S) series. */
@@ -102,7 +119,74 @@ const SCHEMA = [
     { path: 'appearance.accent', label: 'Accent colour', type: 'accent' },
     { path: 'appearance.density', label: 'Density', type: 'select', options: [['comfortable', 'Comfortable'], ['compact', 'Compact']] },
     { path: 'appearance.fontScale', label: 'Text size', type: 'number', min: 0.8, max: 1.3, step: 0.05, hint: '1 = default' },
-    { path: 'appearance.reduceMotion', label: 'Reduce motion', type: 'checkbox', hint: 'Disables transitions and animations' } ] }] },
+    { path: 'appearance.reduceMotion', label: 'Reduce motion', type: 'checkbox', hint: 'Disables transitions and animations' }] }] },
+
+  { id: 'data', title: 'Data', groups: [
+    { title: 'File input', rows: [
+      { path: 'analysis.timeUnit', label: 'Time unit of the file', type: 'select', options: [['auto', 'Auto-detect'], ['ms', 'Milliseconds (ms)'], ['s', 'Seconds (s)'], ['min', 'Minutes (min)']], hint: 'RR intervals or beat times in .txt / .csv files. Auto-detect uses a header hint such as “RR (ms)” or the typical value; choose a unit if it cannot tell.' }] },
+    { title: 'Running', rows: [
+      { path: 'analysis.autoRun', label: 'Run automatically after loading', type: 'checkbox' }] }] },
+
+  { id: 'phases', title: 'Phases', groups: [
+    { title: 'How phases are found', rows: [
+      { type: 'note', text: 'Priority: windows drawn on the tachogram, then typed markers, then automatic detection.' },
+      { path: 'analysis.phaseMode', label: 'Automatic detection', type: 'select', options: [['auto', 'On (from heart rate)'], ['off', 'Off']], hint: 'Finds rest, any number of stressors and recoveries when no windows or markers are given' },
+      { path: 'analysis.phaseSensitivity', label: 'Sensitivity', type: 'select', options: [['conservative', 'Conservative (≥ 12 bpm, z ≥ 5)'], ['standard', 'Standard (≥ 10 bpm, z ≥ 4)'], ['sensitive', 'Sensitive (≥ 8 bpm, z ≥ 4)'], ['custom', 'Custom (values below)']], hint: 'Lower = finds milder stressors but may invent phases in a drifting recording' }] },
+    { title: 'Detection limits', collapsed: true, rows: [
+      { path: 'analysis.phaseMinShift', label: 'Custom: minimum HR change (bpm)', type: 'number', min: 2, step: 1 },
+      { path: 'analysis.phaseMinZ', label: 'Custom: minimum z-score', type: 'number', min: 1, step: 0.5 },
+      { path: 'analysis.phaseMinSegment', label: 'Minimum phase length (s)', type: 'number', min: 10, step: 5 },
+      { path: 'analysis.phaseMaxStressors', label: 'Maximum number of stressors', type: 'number', min: 1, max: 8, step: 1 }] },
+    { title: 'Typed markers', rows: [
+      { path: 'analysis.phaseMarkers', label: 'Marker times (s)', type: 'text', hint: 'Optional; replaces automatic detection. Seconds from the first beat, increasing: end of rest, end of stressor 1, start of stressor 2, end of stressor 2 … e.g. 300, 420 or 240, 360, 600, 780. To draw windows instead, use the phase tool on the RR plot.' }] }] },
+
+  { id: 'model', title: 'Model', groups: [
+    { title: 'Time-scale priors', rows: [
+      { path: 'model.priors.tau_p_bounds', label: 'τ_P interval (s)', type: 'pair', hint: 'Vagal time constant (log-normal, central interval)' },
+      { path: 'model.priors.tau_s_bounds', label: 'τ_S interval (s)', type: 'pair', hint: 'Sympathetic time constant' },
+      { path: 'model.priors.ci_coverage', label: 'Interval coverage', type: 'number', min: 0.5, max: 0.999, step: 0.005 },
+      { path: 'model.priors.jitter_bounds_ms', label: 'RR timing jitter interval (ms)', type: 'pair' },
+      { path: 'model.priors.topo_target_ratio', label: 'Topology target κ_P/κ_S', type: 'number', min: 1.1, step: 1 },
+      { path: 'model.priors.topo_prior_weight', label: 'Topology prior weight', type: 'number', min: 0.1, step: 1 }] },
+    { title: 'Spectral anchor (V_P / V_S)', collapsed: true, rows: [
+      { path: 'model.priors.lf_lower_hz', label: 'LF lower (Hz)', type: 'number', min: 0.001, step: 0.01 },
+      { path: 'model.priors.crossover_hz', label: 'Crossover (Hz)', type: 'number', min: 0.01, step: 0.01 },
+      { path: 'model.priors.lf_upper_hz', label: 'LF upper (Hz)', type: 'number', min: 0.05, step: 0.01 },
+      { path: 'model.priors.hf_upper_hz', label: 'HF upper (Hz)', type: 'number', min: 0.1, step: 0.01 },
+      { path: 'model.priors.sns_leakage_at_boundary', label: 'Sympathetic leakage at LF upper', type: 'number', min: 0.001, max: 0.499, step: 0.01 },
+      { path: 'model.priors.lower_lf_vagal_fraction', label: 'Vagal floor at low frequency', type: 'number', min: 0, max: 0.99, step: 0.05, hint: 'Default 0.5 (the R engine default is 0.1). Share of the vagal weight kept below the crossover.' },
+      { path: 'model.priors.cwt_fs', label: 'CWT resampling (Hz)', type: 'number', min: 1, step: 1 }] },
+    { title: 'Vagal variance gate (γ)', collapsed: true, rows: [
+      { path: 'model.priors.gamma_prior_shape', label: 'Lomax shape', type: 'number', min: 0.1, step: 1 },
+      { path: 'model.priors.gamma_prior_scale', label: 'Lomax scale', type: 'number', min: 0.001, step: 0.01 },
+      { path: 'model.priors.gamma_penalty_threshold', label: 'Wall threshold', type: 'number', min: 0.1, step: 0.1 },
+      { path: 'model.priors.gamma_penalty_rate', label: 'Wall rate', type: 'number', min: 0.1, step: 0.5 },
+      { path: 'model.control.tau_g', label: 'Gate low-pass τ_g (s)', type: 'number', min: 1, step: 1 },
+      { path: 'model.control.zmax', label: 'Gate clip (z units)', type: 'number', min: 0.5, step: 0.5 },
+      { path: 'model.control.gate_off_threshold', label: 'Report gate off if γ below', type: 'number', min: 0, step: 0.01 }] },
+    { title: 'Artifact gate and optimizer', collapsed: true, rows: [
+      { path: 'model.control.jump_threshold', label: 'Jump threshold θ', type: 'number', min: 0.02, step: 0.01, hint: 'Relative RR jump that starts inflating the jitter variance' },
+      { path: 'model.control.jump_power', label: 'Jump power p', type: 'number', min: 1, step: 1 },
+      { path: 'model.control.lik_gate_max', label: 'Exclude beats above multiplier', type: 'number', min: 1, step: 10 },
+      { path: 'model.control.diag_gate_max', label: 'Diagnostics: keep beats below', type: 'number', min: 1, step: 0.1 },
+      { path: 'model.control.pacf_lag_max', label: 'PACF lags', type: 'number', min: 5, max: 100, step: 5 },
+      { path: 'model.control.maxit', label: 'Max BFGS iterations', type: 'number', min: 10, step: 100 },
+      { path: 'model.control.gamma_start', label: 'γ start value', type: 'number', min: 0.000001, step: 0.001 },
+      { path: 'model.control.lR_start', label: 'Λ_R start value', type: 'number', min: 0.000001, step: 0.001 }] },
+    { title: 'Presets', rows: [{ type: 'presets' }] }] },
+
+  { id: 'analysis', title: 'Analysis', groups: [
+    { title: 'Statistics', rows: [
+      { path: 'analysis.computeSE', label: 'Standard errors and Laplace posterior', type: 'checkbox', hint: 'Numerical Hessian: a little extra time' },
+      { path: 'analysis.rollWindow', label: 'Rolling window (s)', type: 'number', min: 20, step: 10 },
+      { path: 'analysis.rollStep', label: 'Rolling step (s)', type: 'number', min: 2, step: 2 }] },
+    { title: 'State-space landscape', rows: [
+      { path: 'analysis.landscapeGrid', label: 'Grid resolution', type: 'number', min: 30, max: 160, step: 10 },
+      { path: 'analysis.landscapeBandwidth', label: 'Smoothing (× Silverman)', type: 'number', min: 0.3, max: 3, step: 0.1 },
+      { path: 'analysis.minBasin', label: 'Basin threshold (share of peak)', type: 'number', min: 0.05, max: 0.9, step: 0.05 },
+      { path: 'analysis.showFlow', label: 'Show mean-flow arrows', type: 'checkbox' },
+      { path: 'analysis.showBasins', label: 'Mark basins', type: 'checkbox' }] }] },
+
   { id: 'charts', title: 'Charts', groups: [
     { title: 'Series', rows: [
       { path: 'charts.colorP', label: 'Vagal-like (x_p) colour', type: 'color', hint: 'Empty = theme default' },
@@ -111,67 +195,22 @@ const SCHEMA = [
       { path: 'charts.showCI', label: 'Show 95% credible bands', type: 'checkbox' },
       { path: 'charts.showGrid', label: 'Show grid lines', type: 'checkbox' },
       { path: 'charts.maxPoints', label: 'Max points per line', type: 'number', min: 300, max: 20000, step: 100, hint: 'Longer series are thinned for drawing only; 0 = never thin' },
-      { path: 'charts.palette', label: 'Heat-map palette', type: 'select', options: PALETTES.map(p => [p, p]), hint: 'Scalogram and landscape' } ] },
+      { path: 'charts.palette', label: 'Heat-map palette', type: 'select', options: PALETTES.map(p => [p, p]), hint: 'Scalogram and landscape' }] },
     { title: 'Visible charts', rows: [{ type: 'chartlist' }] }] },
-  { id: 'model', title: 'Model', groups: [
-    { title: 'Time-scale priors (log-normal, central interval)', rows: [
-      { path: 'model.priors.tau_p_bounds', label: 'τ_P interval (s)', type: 'pair', hint: 'Vagal time constant' },
-      { path: 'model.priors.tau_s_bounds', label: 'τ_S interval (s)', type: 'pair', hint: 'Sympathetic time constant' },
-      { path: 'model.priors.ci_coverage', label: 'Interval coverage', type: 'number', min: 0.5, max: 0.999, step: 0.005 },
-      { path: 'model.priors.jitter_bounds_ms', label: 'RR timing jitter interval (ms)', type: 'pair' },
-      { path: 'model.priors.topo_target_ratio', label: 'Topology target κ_P/κ_S', type: 'number', min: 1.1, step: 1 },
-      { path: 'model.priors.topo_prior_weight', label: 'Topology prior weight', type: 'number', min: 0.1, step: 1 } ] },
-    { title: 'Vagal variance gate (γ)', rows: [
-      { path: 'model.priors.gamma_prior_shape', label: 'Lomax shape', type: 'number', min: 0.1, step: 1 },
-      { path: 'model.priors.gamma_prior_scale', label: 'Lomax scale', type: 'number', min: 0.001, step: 0.01 },
-      { path: 'model.priors.gamma_penalty_threshold', label: 'Wall threshold', type: 'number', min: 0.1, step: 0.1 },
-      { path: 'model.priors.gamma_penalty_rate', label: 'Wall rate', type: 'number', min: 0.1, step: 0.5 },
-      { path: 'model.control.tau_g', label: 'Gate low-pass τ_g (s)', type: 'number', min: 1, step: 1 },
-      { path: 'model.control.zmax', label: 'Gate clip (z units)', type: 'number', min: 0.5, step: 0.5 },
-      { path: 'model.control.gate_off_threshold', label: 'Report gate off if γ below', type: 'number', min: 0, step: 0.01 } ] },
-    { title: 'Spectral anchor (V_P/V_S)', rows: [
-      { path: 'model.priors.lf_lower_hz', label: 'LF lower (Hz)', type: 'number', min: 0.001, step: 0.01 },
-      { path: 'model.priors.crossover_hz', label: 'Crossover (Hz)', type: 'number', min: 0.01, step: 0.01 },
-      { path: 'model.priors.lf_upper_hz', label: 'LF upper (Hz)', type: 'number', min: 0.05, step: 0.01 },
-      { path: 'model.priors.hf_upper_hz', label: 'HF upper (Hz)', type: 'number', min: 0.1, step: 0.01 },
-      { path: 'model.priors.sns_leakage_at_boundary', label: 'Sympathetic leakage at LF upper', type: 'number', min: 0.001, max: 0.499, step: 0.01 },
-      { path: 'model.priors.lower_lf_vagal_fraction', label: 'Vagal floor at low frequency', type: 'number', min: 0, max: 0.99, step: 0.05 },
-      { path: 'model.priors.cwt_fs', label: 'CWT resampling (Hz)', type: 'number', min: 1, step: 1 } ] },
-    { title: 'Artifact gate and optimizer', rows: [
-      { path: 'model.control.jump_threshold', label: 'Jump threshold θ', type: 'number', min: 0.02, step: 0.01, hint: 'Relative RR jump that starts inflating the jitter variance' },
-      { path: 'model.control.jump_power', label: 'Jump power p', type: 'number', min: 1, step: 1 },
-      { path: 'model.control.lik_gate_max', label: 'Exclude beats above multiplier', type: 'number', min: 1, step: 10 },
-      { path: 'model.control.diag_gate_max', label: 'Diagnostics: keep beats below', type: 'number', min: 1, step: 0.1 },
-      { path: 'model.control.pacf_lag_max', label: 'PACF lags', type: 'number', min: 5, max: 100, step: 5 },
-      { path: 'model.control.maxit', label: 'Max BFGS iterations', type: 'number', min: 10, step: 100 },
-      { path: 'model.control.gamma_start', label: 'γ start value', type: 'number', min: 0.000001, step: 0.001 },
-      { path: 'model.control.lR_start', label: 'Λ_R start value', type: 'number', min: 0.000001, step: 0.001 } ] },
-    { title: 'Presets', rows: [{ type: 'presets' }] }] },
-  { id: 'analysis', title: 'Analysis', groups: [{ title: 'Protocol phases (optional)', rows: [
-    { path: 'analysis.phaseRest', label: 'Rest ends at (s)', type: 'number', min: 0, step: 10, hint: 'Seconds from the first beat. Set both fields to mark rest / exercise / recovery; 0 = off. The 5-2-5 example sets them itself.' },
-    { path: 'analysis.phaseExercise', label: 'Exercise ends at (s)', type: 'number', min: 0, step: 10 }] }, { title: 'Behaviour', rows: [
-    { path: 'analysis.autoRun', label: 'Run automatically after loading', type: 'checkbox' },
-    { path: 'analysis.computeSE', label: 'Standard errors and Laplace posterior', type: 'checkbox', hint: 'Numerical Hessian: a little extra time' },
-    { path: 'analysis.rollWindow', label: 'Rolling window (s)', type: 'number', min: 20, step: 10 },
-    { path: 'analysis.rollStep', label: 'Rolling step (s)', type: 'number', min: 2, step: 2 } ] },
-    { title: 'State-space landscape', rows: [
-      { path: 'analysis.landscapeGrid', label: 'Grid resolution', type: 'number', min: 30, max: 160, step: 10 },
-      { path: 'analysis.landscapeBandwidth', label: 'Smoothing (× Silverman)', type: 'number', min: 0.3, max: 3, step: 0.1 },
-      { path: 'analysis.minBasin', label: 'Basin threshold (share of peak)', type: 'number', min: 0.05, max: 0.9, step: 0.05 },
-      { path: 'analysis.showFlow', label: 'Show mean-flow arrows', type: 'checkbox' },
-      { path: 'analysis.showBasins', label: 'Mark basins', type: 'checkbox' } ] }] },
+
   { id: 'export', title: 'Export', groups: [{ title: 'Files and images', rows: [
     { path: 'export.scale', label: 'Image scale', type: 'select', options: [[1, '1× (screen)'], [2, '2×'], [3, '3×'], [4, '4× (print)']], num: true },
     { path: 'export.background', label: 'Image background', type: 'select', options: [['theme', 'Match theme'], ['white', 'White'], ['black', 'Dark']] },
     { path: 'export.prefix', label: 'File name prefix', type: 'text' },
     { path: 'export.separator', label: 'CSV separator', type: 'select', options: [[',', 'Comma ,'], [';', 'Semicolon ;'], ['\t', 'Tab']] },
     { path: 'export.decimal', label: 'Decimal mark', type: 'select', options: [['.', 'Dot .'], [',', 'Comma ,']] },
-    { path: 'export.includeSettings', label: 'Include model settings in reports', type: 'checkbox' } ] }] },
-  { id: 'data', title: 'Data and layout', groups: [{ title: 'Settings file', rows: [{ type: 'settingsio' }] }, { title: 'Layout', rows: [{ type: 'layoutreset' }] }] }
+    { path: 'export.includeSettings', label: 'Include model settings in reports', type: 'checkbox' }] }] },
+
+  { id: 'backup', title: 'Backup & reset', groups: [{ title: 'Settings file', rows: [{ type: 'settingsio' }] }, { title: 'Layout', rows: [{ type: 'layoutreset' }] }] }
 ];
 
 const PRESETS = {
-  'Engine defaults (M3G)': () => S.reset('model'),
+  'Default settings': () => S.reset('model'),
   'Strict artifact gate (θ = 0.15)': () => { S.reset('model'); S.set('model.control.jump_threshold', 0.15, true); },
   'Short recordings (flatter gate prior)': () => { S.reset('model'); S.set('model.priors.gamma_prior_scale', 0.05, true); S.set('model.control.tau_g', 10, true); }
 };
@@ -189,6 +228,7 @@ function validateModelField(path, row) {
 }
 
 function buildRow(r, ctx) {
+  if (r.type === 'note') return el('div', { class: 'set-note', text: r.text });
   if (r.type === 'chartlist') return ctx.chartList();
   if (r.type === 'presets') {
     const box = el('div', { class: 'pair', style: 'flex-wrap:wrap' });
@@ -238,33 +278,37 @@ function buildRow(r, ctx) {
 
 /** Mount the modal. ctx: {chartList(), toast(), download(), render()} supplied by app.js. */
 function mountMenu(host, ctxIn) {
-  let active = 'appearance';
+  let active = 'appearance', query = '';
   const ctx = Object.assign({}, ctxIn, { render: () => render() });
   const nav = el('div', { class: 'set-nav' }), pane = el('div', { class: 'set-pane' });
-  function render() {
+  const search = el('input', { type: 'search', class: 'set-search', placeholder: 'Search settings…', 'aria-label': 'Search settings', oninput: ev => { query = ev.target.value.trim().toLowerCase(); render(true); } });
+  const rowEl = r => { if (!r.label) return buildRow(r, ctx); const lab = el('label', { text: r.label }); if (r.hint) lab.appendChild(el('small', { text: r.hint })); return el('div', { class: 'set-row' }, [lab, buildRow(r, ctx)]); };
+  function groupEl(g, rows, crumb) {
+    const body = rows.map(rowEl);
+    if (g.collapsed && !query) { const d = el('details', { class: 'set-grp adv' }, [el('summary', { text: g.title + ' · advanced' })].concat(body)); return d; }
+    return el('div', { class: 'set-grp' }, [el('h3', { text: crumb ? crumb + ' › ' + g.title : g.title })].concat(body));
+  }
+  function render(keepFocus) {
     nav.innerHTML = ''; pane.innerHTML = '';
-    SCHEMA.forEach(sec => nav.appendChild(el('button', { class: sec.id === active ? 'active' : '', text: sec.title, onclick: () => { active = sec.id; render(); } })));
-    const sec = SCHEMA.find(x => x.id === active);
-    sec.groups.forEach(g => {
-      const grp = el('div', { class: 'set-grp' }, [el('h3', { text: g.title })]);
-      g.rows.forEach(r => {
-        if (!r.label) { grp.appendChild(buildRow(r, ctx)); return; }
-        const lab = el('label', { text: r.label }); if (r.hint) lab.appendChild(el('small', { text: r.hint }));
-        grp.appendChild(el('div', { class: 'set-row' }, [lab, buildRow(r, ctx)]));
-      });
-      pane.appendChild(grp);
-    });
+    nav.appendChild(search);
+    SCHEMA.forEach(sec => nav.appendChild(el('button', { class: sec.id === active && !query ? 'active' : '', text: sec.title, onclick: () => { active = sec.id; query = ''; search.value = ''; render(); } })));
+    if (query) {
+      let n = 0;
+      SCHEMA.forEach(sec => sec.groups.forEach(g => { const rows = g.rows.filter(r => r.label && ((r.label + ' ' + (r.hint || '') + ' ' + (r.path || '')).toLowerCase().includes(query))); if (rows.length) { n += rows.length; pane.appendChild(groupEl(g, rows, sec.title)); } }));
+      if (!n) pane.appendChild(el('div', { class: 'set-note', text: 'No setting matches “' + query + '”.' }));
+    } else SCHEMA.find(x => x.id === active).groups.forEach(g => pane.appendChild(groupEl(g, g.rows)));
+    if (keepFocus) search.focus();
   }
   const close = () => host.classList.remove('show');
   host.innerHTML = '';
   const head = el('div', { class: 'modal-head' }, [el('h2', { text: 'Settings' }), el('button', { class: 'tool', 'aria-label': 'Close settings', html: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>', onclick: close })]);
   const foot = el('div', { class: 'modal-foot' }, [el('span', { class: 'grow', text: 'Changes apply immediately and are saved in this browser. Model settings take effect on the next run.' }),
-    el('button', { class: 'btn btn-ghost', text: 'Reset this section', onclick: () => { const sec = SCHEMA.find(x => x.id === active); if (['appearance', 'charts', 'model', 'analysis', 'export'].includes(sec.id)) { S.reset(sec.id); render(); } } }),
+    el('button', { class: 'btn btn-ghost', text: 'Reset this section', onclick: () => { const sec = SCHEMA.find(x => x.id === active), map = { appearance: 'appearance', model: 'model', analysis: 'analysis', charts: 'charts', export: 'export' }; if (map[sec.id] && !query) { S.reset(map[sec.id]); render(); } } }),
     el('button', { class: 'btn btn-primary', text: 'Done', onclick: close })]);
   host.appendChild(el('div', { class: 'modal-card', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Settings' }, [head, el('div', { class: 'modal-body' }, [nav, pane]), foot]));
   host.addEventListener('click', ev => { if (ev.target === host) close(); });
   render();
-  return { open: sec => { if (sec) active = sec; render(); host.classList.add('show'); }, close, render };
+  return { open: sec => { if (sec) { active = sec; query = ''; search.value = ''; } render(); host.classList.add('show'); }, close, render };
 }
 
 root.SparkSettings = Object.assign(S, { Layout, mountMenu, SCHEMA });
