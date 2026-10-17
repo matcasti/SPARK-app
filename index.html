@@ -2,37 +2,55 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
 <title>SPARK – Stochastic Phase-Domain Autonomic Reconstruction Kinetics</title>
+<meta name="description" content="Client-side latent autonomic reconstruction from RR intervals (SPARK model M3G).">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link href="styles.css" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
 
-<!-- ══ APP ROOT ══ -->
-<!-- Shared floating info tooltip (positioned by JS) -->
+<!-- Shared floating info tooltip (positioned by tips.js) -->
 <div id="info-tip" role="tooltip" aria-live="polite">
   <div class="tip-title"></div>
   <div class="tip-formula"></div>
   <div class="tip-body"></div>
 </div>
+<div id="toasts" aria-live="polite"></div>
+<div class="scrim" id="scrim"></div>
+
 <div id="app">
 
 <!-- TOPBAR -->
 <header class="topbar">
+  <button class="icon-btn" id="menu-btn" aria-label="Open data and analysis panel" title="Data and analysis">
+    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
   <div class="tb-brand">
     <span class="spark-tag">SPARK</span>
     <div>
       <div class="spark-title">Stochastic Phase-Domain Autonomic Reconstruction Kinetics</div>
-      <div class="spark-sub">Dual-filter GLS Kalman &middot; Morlet CWT anchoring &middot; MAP estimation &middot; Client-side</div>
+      <div class="spark-sub">Dual OU drives &middot; causal vagal gate &middot; Morlet CWT anchor &middot; MAP (M3G) &middot; Client-side</div>
     </div>
   </div>
   <div class="tb-right">
-    <span class="ver-badge">v2.0</span>
-    <button class="icon-btn" id="theme-btn" title="Toggle light/dark mode">
+    <span class="model-badge" title="Model specification, identical to the R engine">M3G</span>
+    <button class="btn-top primary" id="btn-run-top" disabled title="Run analysis (R)">
+      <svg width="11" height="11" fill="currentColor" viewBox="0 0 16 16"><path d="M3 2.5l10 5.5-10 5.5V2.5z"/></svg><span class="lbl">Run</span>
+    </button>
+    <div class="menu-wrap">
+      <button class="btn-top" id="btn-export" aria-haspopup="true" aria-expanded="false" title="Export (E)">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg><span class="lbl">Export</span>
+      </button>
+      <div class="menu" id="export-menu"></div>
+    </div>
+    <button class="icon-btn" id="btn-settings" title="Settings (S)" aria-label="Open settings">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+    <button class="icon-btn" id="theme-btn" title="Toggle light/dark mode (T)" aria-label="Toggle light or dark mode">
       <svg id="ico-sun" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="display:none"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
       <svg id="ico-moon" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
     </button>
@@ -43,25 +61,23 @@
 <div class="workspace">
 
   <!-- ── SIDEBAR ── -->
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar" aria-label="Data and analysis">
 
-    <!-- Data Input -->
     <div class="panel">
       <span class="plabel-static">Data Input</span>
       <label class="drop-zone" id="drop-zone" for="file-in">
         <input type="file" id="file-in" accept=".csv,.txt,.dat">
         <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
         <div class="dz-main">Drop file or click to upload</div>
-        <div class="dz-hint">.txt &nbsp;|&nbsp; seconds or ms — auto-detected</div>
+        <div class="dz-hint">.txt &nbsp;|&nbsp; .csv &nbsp;|&nbsp; seconds or ms — auto-detected</div>
       </label>
       <div class="data-chip" id="data-chip"><span class="chip-dot"></span><span id="data-chip-text">No data loaded</span></div>
       <button class="btn btn-ghost" id="btn-example">
         <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 3l14 9-14 9V3z"/></svg>
-        Load example data (400 beats)
+        Load example (5-2-5 exercise test)
       </button>
     </div>
 
-    <!-- Analysis -->
     <div class="panel">
       <span class="plabel-static">Analysis</span>
       <button class="btn btn-primary" id="btn-run" disabled>
@@ -76,93 +92,51 @@
       </div>
       <div id="alert-ok"  class="alert ok"></div>
       <div id="alert-err" class="alert err"></div>
-    </div>
-
-    <!-- Hyperparameters (collapsible) -->
-    <div class="panel">
-      <div class="panel-hdr closed" id="hdr-opts">
-        <span class="plabel">Hyperparameters</span>
-        <span class="parrow closed" id="arr-opts">▾</span>
-      </div>
-      <div class="pbody hidden" id="body-opts">
-        <div class="ctrl-grp">
-          <div class="ctrl-hdr"><span class="ctrl-key">θ_jump</span><span class="ctrl-num" id="v-jthr">0.10</span></div>
-          <input type="range" id="sl-jthr" min="0.04" max="0.30" step="0.01" value="0.10">
-          <div class="ctrl-hint">Fractional jump gate threshold (default: 0.10)</div>
-        </div>
-        <div class="ctrl-grp">
-          <div class="ctrl-hdr"><span class="ctrl-key">p_jump</span><span class="ctrl-num" id="v-jpow">10</span></div>
-          <input type="range" id="sl-jpow" min="2" max="20" step="1" value="10">
-          <div class="ctrl-hint">Null-gain gate steepness (default: 10)</div>
-        </div>
-      </div>
+      <div class="ctrl-hint" id="model-summary" style="margin-top:9px"></div>
+      <button class="btn btn-ghost" id="btn-model-settings" style="margin-top:7px">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+        Model settings…
+      </button>
     </div>
 
     <!-- Parameter Playground (collapsible) -->
     <div class="panel">
-      <div class="panel-hdr closed" id="hdr-sim">
+      <div class="panel-hdr closed" id="hdr-sim" role="button" tabindex="0" aria-expanded="false">
         <span class="plabel">Parameter Playground</span>
         <span class="parrow closed" id="arr-sim">▾</span>
       </div>
       <div class="pbody hidden" id="body-sim">
-        <div class="ctrl-hint" style="margin-bottom:10px">Overrides the Kalman filter's κ/Λ parameters on the loaded data — no re-optimization. Defaults to the last MAP estimate.</div>
-        <div class="ctrl-grp">
-          <div class="ctrl-hdr"><span class="ctrl-key">κ_S</span><span class="ctrl-num" id="v-ks">0.070 Hz</span></div>
-          <input type="range" id="sl-ks" min="0.01" max="0.50" step="0.01" value="0.07">
-        </div>
-        <div class="ctrl-grp">
-          <div class="ctrl-hdr"><span class="ctrl-key">κ_P</span><span class="ctrl-num" id="v-kp">1.100 Hz</span></div>
-          <input type="range" id="sl-kp" min="0.20" max="3.00" step="0.05" value="1.10">
-          <div class="ctrl-hint">Must be &gt; κ_S</div>
-        </div>
-        <div class="ctrl-grp">
-          <div class="ctrl-hdr"><span class="ctrl-key">Λ_R</span><span class="ctrl-num" id="v-lr">0.00050</span></div>
-          <input type="range" id="sl-lr" min="0.0001" max="0.0050" step="0.0001" value="0.0005">
-        </div>
-        <div class="ctrl-grp">
-          <div class="ctrl-hdr"><span class="ctrl-key">Λ_P</span><span class="ctrl-num" id="v-lp">1.000</span></div>
-          <input type="range" id="sl-lp" min="0.05" max="5.00" step="0.01" value="1.00">
-        </div>
+        <div class="ctrl-hint" style="margin-bottom:10px">Re-runs the M3G filter on the loaded data with your parameter values — no re-optimization. Starts from the MAP estimate; Λ_P is the spectral anchor.</div>
+        <div class="ctrl-grp"><div class="ctrl-hdr"><span class="ctrl-key">κ_S</span><span class="ctrl-num" id="v-ks">—</span></div><input type="range" id="sl-ks" min="0" max="1000" value="500" data-min="0.001" data-max="0.5" data-log="1" aria-label="kappa S"></div>
+        <div class="ctrl-grp"><div class="ctrl-hdr"><span class="ctrl-key">κ_P</span><span class="ctrl-num" id="v-kp">—</span></div><input type="range" id="sl-kp" min="0" max="1000" value="500" data-min="0.05" data-max="3" data-log="1" aria-label="kappa P"><div class="ctrl-hint">Must be &gt; κ_S</div></div>
+        <div class="ctrl-grp"><div class="ctrl-hdr"><span class="ctrl-key">Λ_R</span><span class="ctrl-num" id="v-lr">—</span></div><input type="range" id="sl-lr" min="0" max="1000" value="500" data-min="0.00001" data-max="0.05" data-log="1" aria-label="Lambda R"></div>
+        <div class="ctrl-grp"><div class="ctrl-hdr"><span class="ctrl-key">Λ_P</span><span class="ctrl-num" id="v-lp">—</span></div><input type="range" id="sl-lp" min="0" max="1000" value="500" data-min="0.05" data-max="20" data-log="1" aria-label="Lambda P"></div>
+        <div class="ctrl-grp"><div class="ctrl-hdr"><span class="ctrl-key">γ</span><span class="ctrl-num" id="v-gm">—</span></div><input type="range" id="sl-gm" min="0" max="1000" value="0" data-min="0" data-max="2" aria-label="gamma"><div class="ctrl-hint">0 = vagal gate off</div></div>
         <button class="btn btn-ghost" id="btn-sim" style="margin-bottom:8px">
           <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-4.49"/></svg>
           Reset to estimated
         </button>
         <div id="sim-result" style="display:none">
-          <div class="sec" style="margin-top:4px;font-size:.59rem">Manual vs. MAP Estimate</div>
-          <table class="sim-table" id="sim-table">
-            <thead><tr><th>Param</th><th>Estimated</th><th>Manual</th><th>Δ%</th></tr></thead>
-            <tbody id="sim-tbody"></tbody>
-          </table>
+          <div class="sec" style="margin-top:4px;font-size:.59rem">Manual vs. MAP estimate</div>
+          <table class="sim-table"><thead><tr><th>Param</th><th>Estimated</th><th>Manual</th><th>Δ%</th></tr></thead><tbody id="sim-tbody"></tbody></table>
         </div>
       </div>
     </div>
 
-    <!-- Filtered RR Output (collapsible) -->
+    <!-- Filtered RR (collapsible) -->
     <div class="panel">
-      <div class="panel-hdr closed" id="hdr-export">
+      <div class="panel-hdr closed" id="hdr-export" role="button" tabindex="0" aria-expanded="false">
         <span class="plabel">Filtered RR Output</span>
         <span class="parrow closed" id="arr-export">▾</span>
       </div>
       <div class="pbody hidden" id="body-export">
-        <div class="ctrl-hint" style="margin-bottom:10px">The Kalman-filtered RR series is cleaned of ectopic beats and measurement noise. Use it to re-estimate the model, or export it.</div>
+        <div class="ctrl-hint" style="margin-bottom:10px">The model-filtered RR series is cleaned of ectopic beats and timing noise. Re-estimate with it, or download it. More exports are in the Export menu.</div>
         <button class="btn btn-ghost" id="btn-use-filtered" style="margin-bottom:9px">
           <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
           Re-run using filtered RR
         </button>
-        <div class="ctrl-grp">
-          <div class="ctrl-hdr"><span class="ctrl-key">Unit</span></div>
-          <select id="exp-unit" class="sel-ctrl">
-            <option value="s">Seconds (s)</option>
-            <option value="ms">Milliseconds (ms)</option>
-          </select>
-        </div>
-        <div class="ctrl-grp">
-          <div class="ctrl-hdr"><span class="ctrl-key">Format</span></div>
-          <select id="exp-fmt" class="sel-ctrl">
-            <option value="csv">CSV (.csv)</option>
-            <option value="txt">Plain text (.txt)</option>
-          </select>
-        </div>
+        <div class="ctrl-grp"><div class="ctrl-hdr"><span class="ctrl-key">Unit</span></div><select id="exp-unit" class="sel-ctrl"><option value="s">Seconds (s)</option><option value="ms">Milliseconds (ms)</option></select></div>
+        <div class="ctrl-grp"><div class="ctrl-hdr"><span class="ctrl-key">Format</span></div><select id="exp-fmt" class="sel-ctrl"><option value="csv">CSV (.csv)</option><option value="txt">Plain text (.txt)</option></select></div>
         <button class="btn btn-primary" id="btn-export-filtered">
           <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
           Download filtered RR
@@ -170,127 +144,66 @@
       </div>
     </div>
 
+    <div class="panel"><div class="ctrl-hint">Shortcuts: <span class="kbd">R</span> run · <span class="kbd">S</span> settings · <span class="kbd">E</span> export · <span class="kbd">T</span> theme · <span class="kbd">1</span>–<span class="kbd">6</span> tabs</div></div>
+
   </aside>
 
   <!-- ── CONTENT ── -->
-  <main class="content">
+  <main class="content" id="content">
 
-    <!-- Empty state -->
     <div class="empty" id="empty-state">
       <div class="empty-ico">
         <svg width="52" height="52" fill="none" stroke="currentColor" stroke-width=".9" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
       </div>
       <div class="empty-h">Load an RR interval sequence to begin</div>
-      <div class="empty-p">Upload a plain-text file with one RR interval per line (in seconds, 0.1–3.0 s), or explore the model using the built-in 400-beat synthetic dataset.</div>
+      <div class="empty-p">Upload a plain-text file with one RR interval per line (seconds 0.1–3.0, or milliseconds), or explore the model with the built-in simulated 5-2-5 recording: 5 min rest, 2 min exercise, 5 min recovery.</div>
     </div>
 
-    <!-- Results (hidden until run) -->
     <div id="results-wrap" style="display:none">
-
-      <nav class="tab-nav">
-        <button class="tab-btn active" data-tab="overview">Overview</button>
-        <button class="tab-btn" data-tab="signal">Signal</button>
-        <button class="tab-btn" data-tab="autonomic">Autonomic</button>
-        <button class="tab-btn" data-tab="diagnostics">Diagnostics</button>
+      <nav class="tab-nav" role="tablist" aria-label="Results">
+        <button class="tab-btn active" role="tab" data-tab="overview">Overview</button>
+        <button class="tab-btn" role="tab" data-tab="signal">Signal</button>
+        <button class="tab-btn" role="tab" data-tab="autonomic">Autonomic</button>
+        <button class="tab-btn" role="tab" data-tab="model">Gate &amp; Model</button>
+        <button class="tab-btn" role="tab" data-tab="stats">Statistics</button>
+        <button class="tab-btn" role="tab" data-tab="diag">Diagnostics</button>
       </nav>
 
-      <!-- TAB: Overview -->
-      <div id="tab-overview" class="tab-panel active">
+      <div id="tab-overview" class="tab-panel active" role="tabpanel">
         <div class="sec">Key Estimates</div>
         <div class="metric-grid" id="metric-grid"></div>
-        <div class="sec" style="margin-top:4px">Full Parameter Report — SDE-IPFM Phase-Domain Model</div>
+        <div class="sec sec-row" style="margin-top:4px"><span>Full Parameter Report — SDE-IPFM Phase-Domain Model (M3G)</span><span id="model-pill"></span></div>
         <div class="pcard">
           <table class="ptable" id="param-table">
-            <thead><tr><th>Parameter</th><th>Group</th><th>Estimate</th><th>Interpretation</th><th>Status</th></tr></thead>
+            <thead><tr><th>Parameter</th><th>Group</th><th>Estimate</th><th>SE</th><th>95% CI</th><th>Interpretation</th><th>Status</th></tr></thead>
             <tbody id="param-tbody"></tbody>
           </table>
         </div>
+        <div class="se-note" id="se-note"></div>
       </div>
 
-      <!-- TAB: Signal -->
-      <div id="tab-signal" class="tab-panel">
-        <div class="cc mb">
-          <div class="cc-lbl">RR Interval — Phase-Domain Reconstruction with 95% Credible Interval</div>
-          <canvas id="chart-rr" height="130"></canvas>
-        </div>
-        <div class="cc">
-          <div class="cc-lbl">Morlet CWT — Time-Frequency Power Scalogram (log-frequency, inferno scale)</div>
-          <canvas id="chart-cwt" style="display:block;width:100%"></canvas>
-        </div>
-        <div class="cc" style="margin-top:12px">
-          <div class="cc-lbl">Empirical vs Reconstructed Power Spectral Density</div>
-          <canvas id="chart-psd" height="130"></canvas>
-        </div>
-      </div>
-
-      <!-- TAB: Autonomic -->
-      <div id="tab-autonomic" class="tab-panel">
-        <div class="cc mb">
-          <div class="cc-lbl">Native Autonomic Drivers — Parasympathetic &amp; Sympathetic (95% CI)</div>
-          <canvas id="chart-states" height="118"></canvas>
-        </div>
-        <div class="g2">
-          <div class="cc" style="min-height:300px;display:flex;flex-direction:column">
-            <div class="cc-lbl">Autonomic Phase Space Topology — Connected Trajectory</div>
-            <div style="flex:1;position:relative;min-height:260px"><canvas id="chart-phase"></canvas></div>
-          </div>
-          <div class="cc">
-            <div class="cc-lbl">Autonomic Log Balance Index</div>
-            <canvas id="chart-abi" height="260"></canvas>
-          </div>
-        </div>
-        <div class="cc mb" style="margin-top:12px">
-          <div class="cc-lbl">Total Autonomic Drive Magnitude ‖x‖</div>
-          <canvas id="chart-totaldrive" height="140"></canvas>
-        </div>
-        <div class="g2" style="margin-top:12px">
-          <div class="cc">
-            <div class="cc-lbl">Entropy Production Rate ṡ(t) — Instantaneous Allostatic Cost</div>
-            <canvas id="chart-epr" height="160"></canvas>
-          </div>
-          <div class="cc">
-            <div class="cc-lbl">Phase-Plane Areal Velocity dA/dt — Instantaneous Rotation Rate</div>
-            <canvas id="chart-arealvel" height="160"></canvas>
-          </div>
-        </div>
-      </div>
-
-      <!-- TAB: Diagnostics -->
-      <div id="tab-diagnostics" class="tab-panel">
-        <div class="dchips" id="dchips"></div>
-        <div class="g2 mb">
-          <div class="cc">
-            <div class="cc-lbl">Standardized Innovations — Distribution</div>
-            <canvas id="chart-hist" height="158"></canvas>
-          </div>
-          <div class="cc">
-            <div class="cc-lbl">Normal Q-Q Plot of Innovations</div>
-            <canvas id="chart-qq" height="158"></canvas>
-          </div>
-        </div>
-        <div class="g2">
-          <div class="cc">
-            <div class="cc-lbl">Partial Autocorrelation of Innovations (lags 1–20)</div>
-            <canvas id="chart-pacf" height="158"></canvas>
-          </div>
-          <div class="cc">
-            <div class="cc-lbl">Time-Rescaling KS Uniformity Plot</div>
-            <canvas id="chart-ks" height="158"></canvas>
-          </div>
-        </div>
-      </div>
-
-    </div><!-- /results-wrap -->
+      <div id="tab-signal" class="tab-panel" role="tabpanel"><div class="hint-bar">Drag the bar under a chart to resize it, use the arrows icon to switch width, and the eye icon to hide it (restore in Settings → Charts).</div><div class="cc-grid" id="grid-signal"></div></div>
+      <div id="tab-autonomic" class="tab-panel" role="tabpanel"><div class="cc-grid" id="grid-autonomic"></div></div>
+      <div id="tab-model" class="tab-panel" role="tabpanel"><div class="cc-grid" id="grid-model"></div></div>
+      <div id="tab-stats" class="tab-panel" role="tabpanel"><div class="cc-grid" id="grid-stats"></div></div>
+      <div id="tab-diag" class="tab-panel" role="tabpanel"><div class="dchips" id="dchips"></div><div class="cc-grid" id="grid-diag"></div></div>
+    </div>
 
   </main>
+</div>
+</div>
 
-</div><!-- /workspace -->
-</div><!-- /app -->
+<div class="modal" id="settings-modal" aria-hidden="true"></div>
 
 <footer class="site-footer">
   Made with <span class="ft-heart">♥</span> by Matías Castillo-Aguilar
 </footer>
 
+<script src="engine.js"></script>
+<script src="settings.js"></script>
+<script src="charts.js"></script>
+<script src="export.js"></script>
+<script src="tips.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
