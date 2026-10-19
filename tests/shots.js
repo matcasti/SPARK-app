@@ -3,7 +3,7 @@ const path = require('path'), fs = require('fs'), base = path.resolve(__dirname,
 const nm = ['/tmp/br/node_modules', path.join(__dirname, 'node_modules')].find(p => fs.existsSync(path.join(p, 'puppeteer-core')));
 const chromium = require(path.join(nm, '@sparticuz/chromium')).default || require(path.join(nm, '@sparticuz/chromium')), puppeteer = require(path.join(nm, 'puppeteer-core'));
 const chartJs = fs.readFileSync(['/tmp/uitest/node_modules/chart.js/dist/chart.umd.js', path.join(nm, 'chart.js/dist/chart.umd.js')].find(p => fs.existsSync(p)), 'utf8');
-const theme = (process.argv[2] || 'dark'), ids = (process.argv[3] || 'rr,states,phase,landscape,phasetable,cwt,psd,poincare,gain,partition,ellipse,pp-taup,xcorr,hist').split(','), example = process.argv[4] || 'single';
+const theme = (process.argv[2] || 'dark'), ids = (process.argv[3] || 'rr,states,phase,landscape,phasetable,cwt,psd,poincare,partition,ellipse,pp-taup,xcorr,hist').split(','), example = process.argv[4] || 'single';
 const sleep = ms => new Promise(r => setTimeout(r, ms)); const out = '/tmp/shots_' + theme + (example === 'multi' ? '_multi' : ''); fs.mkdirSync(out, { recursive: true });
 (async () => {
   const browser = await puppeteer.launch({ args: [...chromium.args, '--no-sandbox'], executablePath: await chromium.executablePath(), headless: 'shell' });

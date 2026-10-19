@@ -32,14 +32,14 @@ const getPath = (o, p) => p.split('.').reduce((a, k) => (a == null ? a : a[k]), 
 function setPath(o, p, v) { const ks = p.split('.'); let t = o; for (let i = 0; i < ks.length - 1; i++) t = t[ks[i]]; t[ks[ks.length - 1]] = v; }
 
 let state = clone(DEFAULTS); const listeners = [];
-const VERSION = 4;
+const VERSION = 5;
 function load() {
   try {
     const raw = root.localStorage && root.localStorage.getItem(KEY);
     if (raw) {
       const saved = JSON.parse(raw); state = merge(DEFAULTS, saved);
-      // v4: the default vagal floor changed from 0.1 to 0.5; a value saved by an earlier version is the old default, not a choice
-      if (!saved._v || saved._v < 4) { if (state.model.priors.lower_lf_vagal_fraction === 0.1) state.model.priors.lower_lf_vagal_fraction = DEFAULTS.model.priors.lower_lf_vagal_fraction; }
+      // v5: the default vagal floor is now 0.25 (earlier versions: 0.1, then 0.5); a value saved by an earlier version is taken to be the old default, not a choice
+      if (!saved._v || saved._v < 5) { const v = state.model.priors.lower_lf_vagal_fraction; if (v === 0.1 || v === 0.5) state.model.priors.lower_lf_vagal_fraction = DEFAULTS.model.priors.lower_lf_vagal_fraction; }
     }
   } catch (e) { state = clone(DEFAULTS); }
   return state;
@@ -62,7 +62,7 @@ const S = {
     ['priors', 'control'].forEach(g => Object.keys(DEFAULTS.model[g]).forEach(k => { if (JSON.stringify(state.model[g][k]) !== JSON.stringify(DEFAULTS.model[g][k])) d[g][k] = state.model[g][k]; }));
     return d;
   },
-  /** Settings that differ from the R ENGINE's own defaults: what an R script must state explicitly to reproduce the app (the app's vagal floor default is 0.5, R's is 0.1). */
+  /** Settings that differ from the R ENGINE's own defaults: what an R script must state explicitly to reproduce the app (the app defaults equal the engine's). */
   modelDiffVsEngine() {
     const rDef = { priors: Object.assign(clone(DEFAULTS.model.priors), E.R_ENGINE_PRIOR_DEFAULTS), control: clone(DEFAULTS.model.control) }, d = { priors: {}, control: {} };
     ['priors', 'control'].forEach(g => Object.keys(rDef[g]).forEach(k => { if (JSON.stringify(state.model[g][k]) !== JSON.stringify(rDef[g][k])) d[g][k] = state.model[g][k]; }));
@@ -154,16 +154,8 @@ const SCHEMA = [
       { path: 'model.priors.lf_upper_hz', label: 'LF upper (Hz)', type: 'number', min: 0.05, step: 0.01 },
       { path: 'model.priors.hf_upper_hz', label: 'HF upper (Hz)', type: 'number', min: 0.1, step: 0.01 },
       { path: 'model.priors.sns_leakage_at_boundary', label: 'Sympathetic leakage at LF upper', type: 'number', min: 0.001, max: 0.499, step: 0.01 },
-      { path: 'model.priors.lower_lf_vagal_fraction', label: 'Vagal floor at low frequency', type: 'number', min: 0, max: 0.99, step: 0.05, hint: 'Default 0.5 (the R engine default is 0.1). Share of the vagal weight kept below the crossover.' },
+      { path: 'model.priors.lower_lf_vagal_fraction', label: 'Vagal floor at low frequency', type: 'number', min: 0, max: 0.99, step: 0.05, hint: 'Default 0.25 (the engine default). Share of the vagal weight kept below the crossover.' },
       { path: 'model.priors.cwt_fs', label: 'CWT resampling (Hz)', type: 'number', min: 1, step: 1 }] },
-    { title: 'Vagal variance gate (γ)', collapsed: true, rows: [
-      { path: 'model.priors.gamma_prior_shape', label: 'Lomax shape', type: 'number', min: 0.1, step: 1 },
-      { path: 'model.priors.gamma_prior_scale', label: 'Lomax scale', type: 'number', min: 0.001, step: 0.01 },
-      { path: 'model.priors.gamma_penalty_threshold', label: 'Wall threshold', type: 'number', min: 0.1, step: 0.1 },
-      { path: 'model.priors.gamma_penalty_rate', label: 'Wall rate', type: 'number', min: 0.1, step: 0.5 },
-      { path: 'model.control.tau_g', label: 'Gate low-pass τ_g (s)', type: 'number', min: 1, step: 1 },
-      { path: 'model.control.zmax', label: 'Gate clip (z units)', type: 'number', min: 0.5, step: 0.5 },
-      { path: 'model.control.gate_off_threshold', label: 'Report gate off if γ below', type: 'number', min: 0, step: 0.01 }] },
     { title: 'Artifact gate and optimizer', collapsed: true, rows: [
       { path: 'model.control.jump_threshold', label: 'Jump threshold θ', type: 'number', min: 0.02, step: 0.01, hint: 'Relative RR jump that starts inflating the jitter variance' },
       { path: 'model.control.jump_power', label: 'Jump power p', type: 'number', min: 1, step: 1 },
@@ -171,7 +163,6 @@ const SCHEMA = [
       { path: 'model.control.diag_gate_max', label: 'Diagnostics: keep beats below', type: 'number', min: 1, step: 0.1 },
       { path: 'model.control.pacf_lag_max', label: 'PACF lags', type: 'number', min: 5, max: 100, step: 5 },
       { path: 'model.control.maxit', label: 'Max BFGS iterations', type: 'number', min: 10, step: 100 },
-      { path: 'model.control.gamma_start', label: 'γ start value', type: 'number', min: 0.000001, step: 0.001 },
       { path: 'model.control.lR_start', label: 'Λ_R start value', type: 'number', min: 0.000001, step: 0.001 }] },
     { title: 'Presets', rows: [{ type: 'presets' }] }] },
 
@@ -211,8 +202,7 @@ const SCHEMA = [
 
 const PRESETS = {
   'Default settings': () => S.reset('model'),
-  'Strict artifact gate (θ = 0.15)': () => { S.reset('model'); S.set('model.control.jump_threshold', 0.15, true); },
-  'Short recordings (flatter gate prior)': () => { S.reset('model'); S.set('model.priors.gamma_prior_scale', 0.05, true); S.set('model.control.tau_g', 10, true); }
+  'Strict artifact gate (θ = 0.15)': () => { S.reset('model'); S.set('model.control.jump_threshold', 0.15, true); }
 };
 
 function el(tag, attrs, kids) {

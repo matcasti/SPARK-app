@@ -1,21 +1,21 @@
-# SPARK app (v3, model M3G)
+# SPARK app (v3, model M3)
 
 Client-side app: load RR intervals, fit the SPARK model, explore the latent vagal-like / sympathetic-like drives.
 Open `index.html` in a browser (Chart.js is loaded from a CDN; everything else is local, nothing is uploaded).
 
 ## What changed
-**1. Model aligned with the R engine (`engine.js`, port of `01_model_engine.R`).** Replaces the pre-M3G model:
+**1. Model M3, aligned with the R engine (`engine.js`, port of `model_engine.R`).**
 logistic vagal/sympathetic spectral anchor from a Morlet CWT matching `biwavelet::wt` (V_P/V_S), monotone-Hermite HR resampling,
-the causal vagal variance gate (γ, τ_g, two passes with ν₀/σ² plug-ins), the artifact gate (default θ = 0.25) with likelihood and diagnostics cut-offs,
-4-D MAP (ln κ_S, ln(κ_P−κ_S), ln Λ_R, ln γ) with log-normal τ_P / τ_S / jitter priors, Beta topology prior and Lomax + wall prior on γ,
+the artifact multiplier (default θ = 0.25) with likelihood and diagnostics cut-offs,
+3-D MAP (ln κ_S, ln(κ_P−κ_S), ln Λ_R) with log-normal τ_P / τ_S / jitter priors and a Beta topology prior,
 R's own BFGS (`optim`/vmmin) and Hessian-based standard errors (delta method), as in `report_model`.
 **2. GUI.** Responsive layout (sidebar becomes a drawer below 860 px, sticky tabs, touch-sized controls), light/dark themes with accent colours,
 chart cards with toolbars (PNG, fullscreen, width, hide), drag-to-resize cards saved in IndexedDB, toasts, keyboard shortcuts, print stylesheet.
-**3. Visualizations and statistics.** New tabs *Gate & Model* and *Statistics*: vagal gate g_k(t), spectral partition, prior-vs-posterior (τ_P, τ_S, jitter, γ),
+**3. Visualizations and statistics.** New tabs *Model* and *Statistics*: spectral partition, prior-vs-posterior (τ_P, τ_S, jitter),
 τ_P–τ_S Laplace ellipses, parameter correlation matrix, state-space landscape (U = −ln p, basins, mean flow), Poincaré plot, conventional HRV table
 (SDNN, RMSSD, pNN50, LF/HF; observed vs filtered), rolling statistics, x_p–x_s cross-correlation, innovation ACF/PACF/KS/Q-Q/histogram, skew and kurtosis.
 **4. Exports (menu in the top bar).** Any chart as PNG (1–4×, background choice), all charts as ZIP, parameters CSV (estimate, SE, 95% CI),
-per-beat CSV (states with SEs, gain, innovations), filtered RR, full session JSON, self-contained HTML report (print to PDF), and an **R script that reproduces the fit**.
+per-beat CSV (states with SEs, artifact multiplier, innovations), filtered RR, full session JSON, self-contained HTML report (print to PDF), and an **R script that reproduces the fit**.
 **5. Settings (gear icon or `S`).** Appearance, chart styling and which charts are visible, every `spark_priors` / `spark_control` field with presets and live validation,
 analysis options, export defaults, settings import/export. Saved in this browser.
 
@@ -29,11 +29,11 @@ The latent space stays at exactly two states (x_p, x_s).
 - `node tests/test_lifecycle_browser.js`: worker equals main thread, lazy builds, no rebuild on revisit, in-place phase redraw, hidden-tab export, per-window statistics following the phases, stability under rapid interaction: 13 checks.
 - `node tests/test_parse.js`: file formats, unit detection and user choice, errors (31 checks).
 - `node tests/test_phases.js`: automatic detection (accuracy, artifacts, false positives, two and three stressors, graded effort, manual markers, phase summary, per-window statistics): 29 checks.
-- `node tests/test_engine.js`: the JS engine against reference results from the R engine (`tests/reference_R.json`, made by `Rscript tests/make_reference.R 01_model_engine.R`) on four RR series, including the 5-2-5 example and the vagal-floor parameter: 68 checks.
-- `cd tests && npm i jsdom@24 chart.js@4.4.1 @napi-rs/canvas && node test_ui.js`: loads the real page headlessly, runs the analysis, automatic and manual phases, both examples, playground, settings and every export, data input and units, settings organisation, the SPARK API, clean start on a new dataset, row filling and per-window statistics: 77 checks.
+- `node tests/test_engine.js`: the JS engine against reference results from the R engine (`tests/reference_R.json`, made by `Rscript tests/make_reference.R model_engine.R`) on four RR series, including the 5-2-5 example and the vagal-floor parameter: 56 checks.
+- `cd tests && npm i jsdom@24 chart.js@4.4.1 @napi-rs/canvas && node test_ui.js`: loads the real page headlessly, runs the analysis, automatic and manual phases, both examples, playground, settings and every export, data input and units, settings organisation, the SPARK API, clean start on a new dataset, row filling and per-window statistics: 79 checks.
 
-Measured agreement with R: spectral anchor 1e-8; filter states, variances, gain and innovations ≤ 1e-9; MAP objective ≤ 1e-6; fit (κ, γ, ν₀, σ², LL*) ≤ 1e-7 (same iteration counts as R's BFGS);
-standard errors within 1% (numerical Hessian here, `numDeriv` Richardson in R). The R script exported by the app reproduces the browser fit in real R (κ_S 7e-8, κ_P 1e-7, LL* 4e-9).
+Measured agreement with R: spectral anchor 1e-8; filter states, variances and innovations ≤ 1e-9; MAP objective ≤ 1e-6; fit (κ, ν₀, σ², LL*) ≤ 1e-7 (same iteration counts as R's BFGS);
+standard errors within 1% (numerical Hessian here, `numDeriv` Richardson in R). The R script exported by the app reproduces the browser fit in real R (multi-stressor example: κ_S 1e-5, κ_P 8e-6, LL* 3e-4 in absolute value).
 
 ## Statistics per window (v3.8)
 The Statistics tab has a table of **conventional HRV statistics for every phase window**, for the observed RR and for the model-filtered RR side by side: heart rate, mean RR, SDNN, RMSSD, pNN50, LF, HF and LF/HF, with the whole recording as a reference row.
@@ -87,8 +87,8 @@ With several columns the RR column is chosen by its header (rr, rri, ibi, nn, in
 **Time unit.** Milliseconds, seconds or minutes, **auto-detected** from a header hint (“RR (ms)”, “rr_s”, “[min]”) or from the typical value (seconds 0.2–3.5, milliseconds 150–3500, minutes 0.004–0.06). Choose the unit yourself in Data Input → *Time unit* or Settings → Analysis → Data input;
 changing it re-reads the loaded file at once. A unit that makes the values implausible (outside 0.1–3 s) is refused with an explanation, values that fall outside that range are ignored and counted, and values that cannot be classified (for example heart rate in bpm) ask for a manual choice.
 Everything is converted to seconds internally, so the model result does not depend on the file's unit. The chip shows how the file was read; the session JSON records it. Filtered RR can be exported in s, ms or min.
-**Vagal floor at low frequency.** The default is now **0.5** (the R engine default is 0.1; it raises V_P/V_S, for the 5-2-5 example from 0.72 to 2.10 and τ_P from 12 to 18 s). Settings saved by an earlier version with the old default 0.1 are moved to 0.5; a 0.1 chosen afterwards is kept.
-The exported R script states `lower_lf_vagal_fraction` explicitly so that R reproduces the app (set the field to 0.1 to match the R engine's own default).
+**Vagal floor at low frequency.** The default is **0.25** (the engine default). It sets the share of the vagal weight kept below the spectral crossover, so it changes V_P/V_S and with it how an excursion is apportioned between the two drives: report it with the results and vary it as a sensitivity analysis. Settings saved by an earlier version with one of the previous defaults (0.1 or 0.5) are moved to 0.25; a value chosen afterwards is kept.
+The app defaults equal the R engine's, so the exported R script needs no explicit setting for the vagal floor unless you change it.
 
 ## Automatic phase detection (v3.3)
 When no manual times are given, phases are **detected from heart rate** (observed RR only; the model does not detect phases): median HR in 5-s bins → optimal piecewise-constant levels

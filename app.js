@@ -134,7 +134,7 @@ const mmss = s => { const m = Math.floor(s / 60), r = Math.round(s - m * 60); re
 /* ---- analysis ------------------------------------------------------------------------------------------------------------------------------ */
 function modelSummary() {
   const d = ST.modelDiff(), n = Object.keys(d.priors).length + Object.keys(d.control).length;
-  $('model-summary').textContent = n ? `Model: M3G with ${n} setting${n > 1 ? 's' : ''} changed from the defaults.` : 'Model: M3G, default settings.';
+  $('model-summary').textContent = n ? `Model: M3 with ${n} setting${n > 1 ? 's' : ''} changed from the defaults.` : 'Model: M3, default settings.';
 }
 async function run() {
   if (!S.rr || S.running) return; S.running = true; setDrawer(false);
@@ -147,14 +147,14 @@ async function run() {
     const res = await job.done; S.cwt = null;
     setProgress('Preparing the results…', 85); await tick();
     S.fit = res.fit; S.rep = res.rep; S.manual = false;
-    S.auto = { ks: res.fit.params.ks, kp: res.fit.params.kp, lR: res.fit.params.lR, lp: res.fit.params.lp, gamma: res.fit.params.gamma };
+    S.auto = { ks: res.fit.params.ks, kp: res.fit.params.kp, lR: res.fit.params.lR, lp: res.fit.params.lp };
     syncSliders(S.auto); $('sim-result').style.display = 'none';
     renderFit(res, job);
     showTab('overview');
     $('empty-state').style.display = 'none'; $('results-wrap').style.display = 'block';
     setProgress('Complete ✓', 100);
     const p = res.fit.params, ph = S.bundle && S.bundle.events, phText = ph ? ` · phases (${ph.source === 'auto' ? 'detected' : ph.source === 'drawn' ? 'drawn' : 'manual'}): ` + ph.segments.map(g => `${g.name} ${mmss(g.from)}–${mmss(g.to)}`).join(', ') : '';
-    showAlert('ok', `ν₀ = ${(p.nu0 * 60).toFixed(1)} bpm · τ_S = ${(1 / p.ks).toFixed(0)} s · τ_P = ${(1 / p.kp).toFixed(2)} s · γ = ${p.gamma.toFixed(4)}${p.gate_off ? ' (gate off)' : ''} · ${res.fit.opt.convergence === 0 ? 'converged' : 'max iterations reached'}${phText}`);
+    showAlert('ok', `ν₀ = ${(p.nu0 * 60).toFixed(1)} bpm · τ_S = ${(1 / p.ks).toFixed(0)} s · τ_P = ${(1 / p.kp).toFixed(2)} s · ${res.fit.opt.convergence === 0 ? 'converged' : 'max iterations reached'}${phText}`);
   } catch (e) { setProgress('Error', 0); showAlert('err', 'Analysis failed: ' + e.message); console.error(e); }
   S.running = false; $('btn-run').disabled = false; $('btn-run-top').disabled = false;
   return S.bundle;
@@ -191,11 +191,10 @@ function renderFit(pre, job) {
 function renderTables(R) {
   const { fit, rep, dm, diag } = R, p = fit.params, f4 = x => isFinite(x) ? Number(x).toPrecision(5) : '—';
   $('param-tbody').innerHTML = X.paramRows(fit, rep).map(r => `<tr><td class="pn">${r.n}</td><td class="pg"><span class="gtag ${r.gc}">${r.group}</span></td><td class="pv">${f4(r.est)}</td><td class="pse">${isFinite(r.se) ? Number(r.se).toPrecision(3) : '—'}</td><td class="pci">${isFinite(r.lo) ? '[' + Number(r.lo).toPrecision(4) + ', ' + Number(r.hi).toPrecision(4) + ']' : '—'}</td><td class="pi">${r.interp}</td><td class="ps">${r.status}</td></tr>`).join('');
-  $('model-pill').innerHTML = `<span class="pill ${p.gate_off ? 'off' : 'on'}">${p.gate_off ? 'vagal gate off' : 'vagal gate on'}</span>`;
-  $('se-note').textContent = S.manual ? 'Manual parameter values: standard errors are not defined for a manual run.' : rep ? 'SE and 95% intervals: numerical Hessian of the MAP objective with the delta method (as report_model in the R engine). Profiled, fixed and derived parameters have no SE; γ has none when the gate is off.' : 'Standard errors are switched off (Settings → Analysis).';
+  $('se-note').textContent = S.manual ? 'Manual parameter values: standard errors are not defined for a manual run.' : rep ? 'SE and 95% intervals: numerical Hessian of the MAP objective with the delta method (as report_model in the R engine). Profiled, fixed and derived parameters have no SE.' : 'Standard errors are switched off (Settings → Analysis).';
   const items = [
     { l: 'Heart rate', v: (p.nu0 * 60).toFixed(1), u: 'bpm', hi: true, t: 'm-hr' }, { l: 'τ Sympathetic', v: (1 / p.ks).toFixed(1), u: 's', t: 'm-ts' }, { l: 'τ Parasympathetic', v: (1 / p.kp).toFixed(2), u: 's', t: 'm-tp' },
-    { l: 'κ_P / κ_S', v: (p.kp / p.ks).toFixed(2), u: '×', t: 'm-kpks' }, { l: 'V_P / V_S', v: p.lp.toFixed(3), u: '', t: 'm-hflf' }, { l: 'Vagal gate γ', v: p.gamma.toFixed(4), u: p.gate_off ? 'off' : 'on', t: 'm-gamma' },
+    { l: 'κ_P / κ_S', v: (p.kp / p.ks).toFixed(2), u: '×', t: 'm-kpks' }, { l: 'V_P / V_S', v: p.lp.toFixed(3), u: '', t: 'm-hflf' }, { l: 'Λ_R', v: p.lR.toExponential(2), u: '', t: 'm-lr' },
     { l: 'σ_P / σ_S', v: (p.sigP / p.sigS).toFixed(2), u: '×', t: 'm-sigs' }, { l: 'RR jitter', v: p.rr_jitter_ms.toFixed(2), u: 'ms', t: 'm-jit' }, { l: 'RMSSD (filtered)', v: dm.rmssdFlt.toFixed(1), u: 'ms', t: 'm-rmssd' },
     { l: 'SDNN (filtered)', v: dm.sdnnFlt.toFixed(1), u: 'ms', t: 'm-sdnn' }, { l: 'Fit RMSE', v: dm.rmse.toFixed(2), u: 'ms', t: 'm-rmse' }, { l: 'Gated beats', v: dm.pctGated.toFixed(1), u: '%', t: 'm-gate' },
     { l: 'Log-likelihood', v: fit.LL_star.toFixed(1), u: '', t: 'm-ll' }, { l: 'Areal velocity', v: dm.rmsArealVel.toFixed(5), u: 'Hz²/s', t: 'm-avel' }, { l: 'Mean EPR  ṡ̄', v: dm.mEPR.toFixed(4), u: 's⁻¹', t: 'm-mepr' }, { l: 'Balance σ', v: dm.abiStd.toFixed(3), u: 'nats', t: 'm-bstd' }];
@@ -236,20 +235,20 @@ $('btn-phase-edit').onclick = () => { setDrawer(false); showTab('signal'); const
 $('btn-phase-settings').onclick = () => { setDrawer(false); openSettings('phases'); };
 
 /* ---- playground ---------------------------------------------------------------------------------------------------------------------------------- */
-const SL = { ks: 'sl-ks', kp: 'sl-kp', lR: 'sl-lr', lp: 'sl-lp', gamma: 'sl-gm' }, LBL = { ks: 'v-ks', kp: 'v-kp', lR: 'v-lr', lp: 'v-lp', gamma: 'v-gm' };
+const SL = { ks: 'sl-ks', kp: 'sl-kp', lR: 'sl-lr', lp: 'sl-lp' }, LBL = { ks: 'v-ks', kp: 'v-kp', lR: 'v-lr', lp: 'v-lp' };
 function sliderValue(el) { const mn = +el.dataset.min, mx = +el.dataset.max, t = +el.value / 1000; return el.dataset.log ? mn * Math.pow(mx / mn, t) : mn + (mx - mn) * t; }
 function sliderSet(el, v) { const mn = +el.dataset.min, mx = +el.dataset.max; v = Math.min(mx, Math.max(mn, v)); el.value = Math.round(1000 * (el.dataset.log ? Math.log(v / mn) / Math.log(mx / mn) : (v - mn) / (mx - mn))); }
-function updateSimLabels() { $('v-ks').textContent = sliderValue($('sl-ks')).toFixed(4) + ' Hz'; $('v-kp').textContent = sliderValue($('sl-kp')).toFixed(3) + ' Hz'; $('v-lr').textContent = sliderValue($('sl-lr')).toExponential(2); $('v-lp').textContent = sliderValue($('sl-lp')).toFixed(3); $('v-gm').textContent = sliderValue($('sl-gm')).toFixed(3); }
+function updateSimLabels() { $('v-ks').textContent = sliderValue($('sl-ks')).toFixed(4) + ' Hz'; $('v-kp').textContent = sliderValue($('sl-kp')).toFixed(3) + ' Hz'; $('v-lr').textContent = sliderValue($('sl-lr')).toExponential(2); $('v-lp').textContent = sliderValue($('sl-lp')).toFixed(3); }
 function syncSliders(a) { Object.keys(SL).forEach(k => sliderSet($(SL[k]), a[k])); updateSimLabels(); }
 let _pg = null; Object.values(SL).forEach(id => $(id).addEventListener('input', () => { updateSimLabels(); clearTimeout(_pg); _pg = setTimeout(() => runPlayground(), 140); }));
 function renderSim(a, m) {
-  const rows = [['κ_S', a.ks, m.ks], ['κ_P', a.kp, m.kp], ['Λ_R', a.lR, m.lR], ['Λ_P', a.lp, m.lp], ['γ', a.gamma, m.gamma]];
+  const rows = [['κ_S', a.ks, m.ks], ['κ_P', a.kp, m.kp], ['Λ_R', a.lR, m.lR], ['Λ_P', a.lp, m.lp]];
   $('sim-tbody').innerHTML = rows.map(([n, x, y]) => { const d = x > 1e-9 ? 100 * (y - x) / x : NaN, cls = !isFinite(d) ? '' : Math.abs(d) < 5 ? 'dok' : Math.abs(d) < 15 ? 'dpos' : 'dneg'; return `<tr><td>${n}</td><td>${x.toPrecision(4)}</td><td>${y.toPrecision(4)}</td><td class="${cls}">${isFinite(d) ? (d > 0 ? '+' : '') + d.toFixed(1) + '%' : '—'}</td></tr>`; }).join('');
   $('sim-result').style.display = 'block';
 }
 function runPlayground(exact) {
   if (!S.rr || !S.auto) return;
-  const v = exact || { ks: sliderValue($('sl-ks')), kp: sliderValue($('sl-kp')), lR: sliderValue($('sl-lr')), lp: sliderValue($('sl-lp')), gamma: sliderValue($('sl-gm')) };
+  const v = exact || { ks: sliderValue($('sl-ks')), kp: sliderValue($('sl-kp')), lR: sliderValue($('sl-lr')), lp: sliderValue($('sl-lp')) };
   if (v.kp <= v.ks) { showAlert('err', 'κ_P must be greater than κ_S for a valid model.'); return; }
   try {
     const base = S.fit.pr, pr2 = Object.assign({}, base, { energy_ratio: v.lp }), fit = E.runManualFit(S.rr, pr2, S.fit.ctl, v);

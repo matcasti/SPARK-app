@@ -1,12 +1,12 @@
 /* ============================================================================
-   SPARK engine (M3G) -- port of 01_model_engine.R. Pure functions: no DOM, so the same file
+   SPARK engine (M3) -- port of model_engine.R. Pure functions: no DOM, so the same file
    runs in the browser and in Node (tests/test_engine.js compares it with the R engine).
 
    Model: dual OU drives (x_p vagal-like, x_s sympathetic-like) -> integrate-and-fire phase.
-   Estimation: concentrated (GLS) likelihood, MAP over theta = (ln ks, ln(kp-ks), ln lR, ln gamma)
-   with log-normal priors on tau_p, tau_s and RR jitter, a Beta prior on the topology, a Lomax
-   prior + exponential wall on gamma, a spectral anchor for V_p/V_s from a Morlet CWT, an artifact
-   gate and a causal vagal variance gate. The optimizer is R's BFGS (vmmin) so fits agree with fit_model().
+   Estimation: concentrated (GLS) likelihood, MAP over theta = (ln ks, ln(kp-ks), ln lR)
+   with log-normal priors on tau_p, tau_s and RR jitter, a Beta prior on the topology, a spectral
+   anchor for V_p/V_s from a Morlet CWT and an artifact multiplier. The optimizer is R's BFGS (vmmin)
+   so fits agree with fit_model().
    ========================================================================== */
 /** The engine is a factory so that the very same source can be started inside a Web Worker (SparkEngineFactory.toString()). */
 function SparkEngineFactory(root) {
@@ -103,19 +103,18 @@ function monoSpline(xs, ys) {
 }
 
 /* ---- settings (spark_priors / spark_control) --------------------------------------------------- */
-/* Defaults of the app. They equal the R engine's spark_priors() except lower_lf_vagal_fraction: 0.5 here (the R engine default is 0.1);
-   the exported R script states it explicitly, so results agree. */
+/* Defaults of the app. They equal the R engine's spark_priors() and spark_control(). */
 const DEFAULT_PRIORS = {
   tau_p_bounds: [3, 6], tau_s_bounds: [100, 300], ci_coverage: 0.95, topo_target_ratio: 20, topo_prior_weight: 10,
-  jitter_bounds_ms: [0.5, 20], gamma_prior_shape: 10, gamma_prior_scale: 0.1, gamma_penalty_threshold: 1, gamma_penalty_rate: 5,
+  jitter_bounds_ms: [0.5, 20],
   lf_lower_hz: 0.04, lf_upper_hz: 0.15, hf_upper_hz: 0.40, crossover_hz: 0.10, sns_leakage_at_boundary: 0.05,
-  lower_lf_vagal_fraction: 0.5, cwt_fs: 4
+  lower_lf_vagal_fraction: 0.25, cwt_fs: 4
 };
-/** The R engine's own default for the one setting that differs. */
-const R_ENGINE_PRIOR_DEFAULTS = { lower_lf_vagal_fraction: 0.1 };
+/** The R engine's own defaults for the settings the exported script states explicitly (none differs from the app defaults). */
+const R_ENGINE_PRIOR_DEFAULTS = { lower_lf_vagal_fraction: 0.25 };
 const DEFAULT_CONTROL = {
-  jump_threshold: 0.25, jump_power: 10, lik_gate_max: 100, tau_g: 15, zmax: 3, gamma_start: 0.001, lR_start: 0.001,
-  kp_gap_floor: 0.05, maxit: 1000, gate_off_threshold: 0.05, diag_gate_max: 1.5, pacf_lag_max: 40
+  jump_threshold: 0.25, jump_power: 10, lik_gate_max: 100, lR_start: 0.001,
+  kp_gap_floor: 0.05, maxit: 1000, diag_gate_max: 1.5, pacf_lag_max: 40
 };
 const clone = o => JSON.parse(JSON.stringify(o));
 
@@ -129,9 +128,8 @@ function sparkPriors(user) {
   const p = Object.assign(clone(DEFAULT_PRIORS), user || {});
   checkInterval('tau_p_bounds', p.tau_p_bounds); checkInterval('tau_s_bounds', p.tau_s_bounds); checkInterval('jitter_bounds_ms', p.jitter_bounds_ms);
   checkRange('ci_coverage', p.ci_coverage, 0, 1, true, true); checkRange('topo_target_ratio', p.topo_target_ratio, 1, Infinity, true);
-  checkRange('topo_prior_weight', p.topo_prior_weight, 0, Infinity, true); checkRange('gamma_prior_shape', p.gamma_prior_shape, 0, Infinity, true);
-  checkRange('gamma_prior_scale', p.gamma_prior_scale, 0, Infinity, true); checkRange('gamma_penalty_threshold', p.gamma_penalty_threshold, 0, Infinity, true);
-  checkRange('gamma_penalty_rate', p.gamma_penalty_rate, 0, Infinity, true); checkRange('sns_leakage_at_boundary', p.sns_leakage_at_boundary, 0, 0.5, true, true);
+  checkRange('topo_prior_weight', p.topo_prior_weight, 0, Infinity, true);
+  checkRange('sns_leakage_at_boundary', p.sns_leakage_at_boundary, 0, 0.5, true, true);
   checkRange('lower_lf_vagal_fraction', p.lower_lf_vagal_fraction, 0, 1, false, true); checkRange('cwt_fs', p.cwt_fs, 0, Infinity, true);
   if (!(p.lf_lower_hz > 0 && p.lf_lower_hz < p.crossover_hz && p.crossover_hz < p.lf_upper_hz && p.lf_upper_hz < p.hf_upper_hz))
     throw new Error('Spectral bands must satisfy 0 < lf_lower < crossover < lf_upper < hf_upper.');
@@ -142,15 +140,14 @@ function sparkPriors(user) {
   p.log_jit_mu = (lg(jb[0]) + lg(jb[1])) / 2; p.sigma_log_jit = (lg(jb[1]) - lg(jb[0])) / (2 * z);
   const Umode = (p.topo_target_ratio - 1) / (p.topo_target_ratio + 1);
   p.alpha_minus_1 = Umode * p.topo_prior_weight; p.beta_minus_1 = (1 - Umode) * p.topo_prior_weight;
-  p.gamma_slope0 = (p.gamma_prior_shape + 1) / p.gamma_prior_scale;
   p.spectral_slope = -Math.log(p.sns_leakage_at_boundary / (1 - p.sns_leakage_at_boundary)) / (p.lf_upper_hz - p.crossover_hz);
   p.ks_mode = 1 / Math.exp(p.log_tau_s_mu); p.kp_mode = 1 / Math.exp(p.log_tau_p_mu);
   return p;
 }
 function sparkControl(user) {
   const c = Object.assign(clone(DEFAULT_CONTROL), user || {});
-  ['jump_threshold', 'jump_power', 'tau_g', 'zmax', 'gamma_start', 'lR_start', 'kp_gap_floor'].forEach(k => checkRange(k, c[k], 0, Infinity, true));
-  checkRange('lik_gate_max', c.lik_gate_max, 1, Infinity); checkRange('maxit', c.maxit, 1, Infinity); checkRange('gate_off_threshold', c.gate_off_threshold, 0, Infinity);
+  ['jump_threshold', 'jump_power', 'lR_start', 'kp_gap_floor'].forEach(k => checkRange(k, c[k], 0, Infinity, true));
+  checkRange('lik_gate_max', c.lik_gate_max, 1, Infinity); checkRange('maxit', c.maxit, 1, Infinity);
   checkRange('diag_gate_max', c.diag_gate_max, 1, Infinity); checkRange('pacf_lag_max', c.pacf_lag_max, 1, Infinity);
   c.pacf_lag_max = Math.floor(c.pacf_lag_max);
   return c;
@@ -248,25 +245,18 @@ function artifactGate(dy, ctl) {
 
 /* One causal pass. State per beat: X0 = (x_p, x_s, phase_p, phase_s), Xv = same for the nu0 sensitivity. After each beat the
    phases reset to 0, so only the 2x2 block of (x_p, x_s) carries over and the covariance update is P - r r'/S (Joseph form). */
-function glsPass(dy, kp, ks, lp, lR, gam, nuPlug, sdP, ctl, gm) {
+function glsPass(dy, kp, ks, lp, lR, ctl, gm) {
   const N = dy.length, hp = {}, hs = {}, bp = {}, hq = {};
-  const S = new Float64Array(N), Sun = new Float64Array(N), v0 = new Float64Array(N), vv = new Float64Array(N), gain = new Float64Array(N).fill(1);
+  const S = new Float64Array(N), Sun = new Float64Array(N), v0 = new Float64Array(N), vv = new Float64Array(N);
   const X0s = new Float64Array(N * 4), Xvs = new Float64Array(N * 4), Pst = new Float64Array(N * 5);   // [P11, P22, P33, P44, P34] (1-indexed)
-  let x0p = 0, x0s = 0, xvp = 0, xvs = 0, u = lp, w = 0, v = 1, mlp = 0;
+  let x0p = 0, x0s = 0, xvp = 0, xvs = 0, u = lp, w = 0, v = 1;
   const a = (dt) => Math.exp(-kp * dt), b = (dt) => Math.exp(-ks * dt);
   for (let k = 0; k < N; k++) {
     const dt = dy[k], dynLR = Math.min(lR * gm[k], 1e12);
     ouBlock(ks, dt, 1.0, hs); ouBlock(kp, dt, 1.0, hq);
     const A = a(dt), B = b(dt), C = hq.phi, D = hs.phi;
     const X0pp = A * x0p, X0ps = B * x0s, Xvpp = A * xvp, Xvps = B * xvs;     // predicted x_p, x_s
-    let g = 1;
-    if (gam > 0) {
-      const ae = Math.exp(-dt / ctl.tau_g);
-      mlp = ae * mlp + (1 - ae) * (X0pp - nuPlug * Xvpp);
-      g = Math.exp(Math.max(Math.min(gam * mlp / sdP, ctl.zmax), -ctl.zmax));
-    }
-    gain[k] = g;
-    ouBlock(kp, dt, lp * g, bp);
+    ouBlock(kp, dt, lp, bp);
     // predicted covariance (4x4, symmetric): indices 0=x_p 1=x_s 2=phase_p 3=phase_s
     const P00 = A * A * u + bp.q11, P01 = A * B * w, P02 = A * C * u + bp.q13, P03 = A * D * w;
     const P11 = B * B * v + hs.q11, P12 = B * C * w, P13 = B * D * v + hs.q13;
@@ -290,23 +280,13 @@ function glsPass(dy, kp, ks, lp, lR, gam, nuPlug, sdP, ctl, gm) {
   let den = 0, num = 0;
   for (let k = 0; k < N; k++) if (isFinite(vv[k]) && isFinite(S[k]) && S[k] > 0) { den += vv[k] * vv[k] / S[k]; num += v0[k] * vv[k] / S[k]; }
   const nu0 = den > 1e-12 && isFinite(den) ? num / den : 0;
-  return { S, Sun, v0, vv, X0s, Xvs, Pst, gain, nu0, den };
+  return { S, Sun, v0, vv, X0s, Xvs, Pst, nu0, den };
 }
 
-/** run_gls_filter(): returns LL_star, nu0, sig2, states (x_p, x_s, variances), innovations, implied RR, gate multiplier and vagal gain. */
-function runGLSFilter(dy, kp, ks, lp, lR, gamma, control) {
+/** run_gls_filter(): returns LL_star, nu0, sig2, states (x_p, x_s, variances), innovations, implied RR and the artifact multiplier. */
+function runGLSFilter(dy, kp, ks, lp, lR, control) {
   const ctl = control || sparkControl(), N = dy.length, gm = artifactGate(dy, ctl);
-  const sig2Of = r => {
-    const ok = []; let nOk = 0; for (let k = 0; k < N; k++) { const o = gm[k] < ctl.lik_gate_max; ok.push(o); if (o) nOk++; }
-    const useAll = nOk < 2; let s = 0, n = 0;
-    for (let k = 0; k < N; k++) if (useAll || ok[k]) { const v = r.v0[k] - r.nu0 * r.vv[k]; s += v * v / r.S[k]; n++; }
-    return Math.max(s / n, 1e-12);
-  };
-  let res = glsPass(dy, kp, ks, lp, lR, 0, 0, 0, ctl, gm);
-  if (gamma > 1e-6 && isFinite(res.nu0) && res.nu0 > 0) {
-    const sdP = Math.sqrt(lp * sig2Of(res));
-    res = glsPass(dy, kp, ks, lp, lR, gamma, res.nu0, sdP, ctl, gm);
-  }
+  const res = glsPass(dy, kp, ks, lp, lR, ctl, gm);
   if (!isFinite(res.nu0) || res.nu0 <= 0) return { LL_star: -Infinity, nu0: NaN, sig2: NaN, gate_multiplier: gm, ok: false };
   let nEff = 0; const ok = new Array(N);
   for (let k = 0; k < N; k++) { ok[k] = gm[k] < ctl.lik_gate_max; if (ok[k]) nEff++; }
@@ -327,12 +307,12 @@ function runGLSFilter(dy, kp, ks, lp, lR, gamma, control) {
     irr[k] = (1 + st[2] - st[3]) / res.nu0; tres[k] = dy[k] - irr[k];
   }
   return { ok: true, LL_star: LL, nu0: res.nu0, sig2, Xp, Xs, XpV, XsV, rrV, irr, innovations: zs, innovations_diagnostic: zd,
-           time_residuals: tres, gate_multiplier: gm, gain: res.gain };
+           time_residuals: tres, gate_multiplier: gm };
 }
 
 /* ---- MAP objective, optimizer, fit -------------------------------------------------------------------- */
-const thetaToPar = th => { const ks = Math.exp(th[0]); return { ks, kp: ks + Math.exp(th[1]), lR: Math.exp(th[2]), gamma: Math.exp(th[3]) }; };
-const parToTheta = p => [Math.log(p.ks), Math.log(p.kp - p.ks), Math.log(p.lR), Math.log(Math.max(p.gamma, 1e-12))];
+const thetaToPar = th => { const ks = Math.exp(th[0]); return { ks, kp: ks + Math.exp(th[1]), lR: Math.exp(th[2]) }; };
+const parToTheta = p => [Math.log(p.ks), Math.log(p.kp - p.ks), Math.log(p.lR)];
 
 /** .log_prior_terms(): one term per prior, up to constants. */
 function logPriorTerms(par, res, dy, pr) {
@@ -342,15 +322,13 @@ function logPriorTerms(par, res, dy, pr) {
   const topo = pr.alpha_minus_1 * Math.log(U) + pr.beta_minus_1 * Math.log(OneU);
   const sRR = Math.sqrt(res.sig2 * par.lR * median(dy)) / res.nu0;
   const lRt = -0.5 * ((Math.log(sRR) - pr.log_jit_mu) / pr.sigma_log_jit) ** 2;
-  let gt = -(pr.gamma_prior_shape + 1) * Math.log1p(par.gamma / pr.gamma_prior_scale);
-  gt -= Math.expm1(Math.min(pr.gamma_penalty_rate * Math.max(par.gamma - pr.gamma_penalty_threshold, 0), 30));
-  return { tau_s: tS, tau_p: tP, topology: topo, lR: lRt, gamma: gt };
+  return { tau_s: tS, tau_p: tP, topology: topo, lR: lRt };
 }
-/** objective_map_4d(): negative log-posterior (1e12 when not finite). */
+/** objective_map(): negative log-posterior (1e12 when not finite). */
 function objectiveMap(theta, dy, pr, ctl) {
-  const par = thetaToPar(theta), res = runGLSFilter(dy, par.kp, par.ks, pr.energy_ratio, par.lR, par.gamma, ctl);
+  const par = thetaToPar(theta), res = runGLSFilter(dy, par.kp, par.ks, pr.energy_ratio, par.lR, ctl);
   if (!res.ok) return 1e12;
-  const pen = logPriorTerms(par, res, dy, pr), val = -(res.LL_star + pen.tau_s + pen.tau_p + pen.topology + pen.lR + pen.gamma);
+  const pen = logPriorTerms(par, res, dy, pr), val = -(res.LL_star + pen.tau_s + pen.tau_p + pen.topology + pen.lR);
   return isFinite(val) ? val : 1e12;
 }
 
@@ -404,7 +382,7 @@ function fitModel(dyIn, priorsIn, controlIn, onProgress) {
 }
 /** The optimization part of fit_model(), given the spectral prior (lets the UI show progress between stages). */
 function fitFromAnchor(dy, pr, ctl) {
-  const theta0 = [Math.log(pr.ks_mode), Math.log(Math.max(pr.kp_mode - pr.ks_mode, ctl.kp_gap_floor)), Math.log(ctl.lR_start), Math.log(ctl.gamma_start)];
+  const theta0 = [Math.log(pr.ks_mode), Math.log(Math.max(pr.kp_mode - pr.ks_mode, ctl.kp_gap_floor)), Math.log(ctl.lR_start)];
   const opt = bfgsR(th => objectiveMap(th, dy, pr, ctl), theta0, ctl.maxit);
   if (!isFinite(opt.value)) throw new Error('Optimization failed.');
   return assembleFit(dy, pr, ctl, thetaToPar(opt.par), opt);
@@ -420,13 +398,13 @@ function cwtDisplay(dy) {
 }
 /** Final pass at given parameters (also used by the playground). */
 function assembleFit(dy, pr, ctl, par, opt) {
-  const Vp = pr.energy_ratio, r = runGLSFilter(dy, par.kp, par.ks, Vp, par.lR, par.gamma, ctl);
+  const Vp = pr.energy_ratio, r = runGLSFilter(dy, par.kp, par.ks, Vp, par.lR, ctl);
   if (!r.ok) throw new Error('Filter failed (non-positive nu0).');
   const time = []; let acc = 0; for (let i = 0; i < dy.length; i++) { acc += dy[i]; time.push(acc); }
   const medDy = median(dy);
-  const params = { ks: par.ks, kp: par.kp, lR: par.lR, lp: Vp, gamma: par.gamma, gate_off: par.gamma < ctl.gate_off_threshold, nu0: r.nu0, sig2: r.sig2,
+  const params = { ks: par.ks, kp: par.kp, lR: par.lR, lp: Vp, nu0: r.nu0, sig2: r.sig2,
                    sigP: Math.sqrt(2 * par.kp * Vp * r.sig2), sigS: Math.sqrt(2 * par.ks * r.sig2), rr_jitter_ms: 1000 * Math.sqrt(r.sig2 * par.lR * medDy) / r.nu0 };
-  return { model: 'M3G', dy, time, pr, ctl, params, LL_star: r.LL_star, gain: r.gain, Xp: r.Xp, Xs: r.Xs, XpV: r.XpV, XsV: r.XsV, rrV: r.rrV,
+  return { model: 'M3', dy, time, pr, ctl, params, LL_star: r.LL_star, Xp: r.Xp, Xs: r.Xs, XpV: r.XpV, XsV: r.XsV, rrV: r.rrV,
            irr: r.irr, innovations: r.innovations, innovations_diagnostic: r.innovations_diagnostic, time_residuals: r.time_residuals,
            gate: r.gate_multiplier, opt: opt || null };
 }
@@ -472,14 +450,14 @@ function pinv(A) {
 /** report_model(): delta-method SEs from the numerical Hessian of the MAP objective. Also returns the theta covariance and the Laplace sd of ln tau. */
 function reportModel(fit) {
   const p = fit.params, theta = parToTheta(p), f = th => objectiveMap(th, fit.dy, fit.pr, fit.ctl);
-  const H = numHessian(f, theta), invH = pinv(H), J = [[p.ks, 0, 0, 0], [p.ks, p.kp - p.ks, 0, 0], [0, 0, p.lR, 0], [0, 0, 0, p.gamma]];
-  const cov = J.map((row, i) => J.map((row2, j) => { let s = 0; for (let a = 0; a < 4; a++) for (let b = 0; b < 4; b++) s += row[a] * invH[a][b] * row2[b]; return s; }));
+  const H = numHessian(f, theta), invH = pinv(H), J = [[p.ks, 0, 0], [p.ks, p.kp - p.ks, 0], [0, 0, p.lR]];
+  const cov = J.map((row, i) => J.map((row2, j) => { let s = 0; for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) s += row[a] * invH[a][b] * row2[b]; return s; }));
   const se = i => Math.sqrt(Math.max(cov[i][i], 0));
-  const seKs = se(0), seKp = se(1), seLR = se(2), seGm = p.gate_off ? NaN : se(3);
-  const jt = [[-1, 0, 0, 0], [-p.ks / p.kp, -(p.kp - p.ks) / p.kp, 0, 0]];             // d(ln tau_s, ln tau_p)/d(theta)
-  const lnTauCov = jt.map(r1 => jt.map(r2 => { let s = 0; for (let a = 0; a < 4; a++) for (let b = 0; b < 4; b++) s += r1[a] * invH[a][b] * r2[b]; return s; }));
+  const seKs = se(0), seKp = se(1), seLR = se(2);
+  const jt = [[-1, 0, 0], [-p.ks / p.kp, -(p.kp - p.ks) / p.kp, 0]];             // d(ln tau_s, ln tau_p)/d(theta)
+  const lnTauCov = jt.map(r1 => jt.map(r2 => { let s = 0; for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) s += r1[a] * invH[a][b] * r2[b]; return s; }));
   const ev = eigenSym(H.map((r, i) => r.map((v, j) => (v + H[j][i]) / 2))).values;
-  return { se: { ks: seKs, kp: seKp, lR: seLR, gamma: seGm, tau_s: Math.sqrt(Math.max(cov[0][0] / p.ks ** 4, 0)), tau_p: Math.sqrt(Math.max(cov[1][1] / p.kp ** 4, 0)) },
+  return { se: { ks: seKs, kp: seKp, lR: seLR, tau_s: Math.sqrt(Math.max(cov[0][0] / p.ks ** 4, 0)), tau_p: Math.sqrt(Math.max(cov[1][1] / p.kp ** 4, 0)) },
            hessian: H, thetaCov: invH, physCov: cov, lnTauCov, sd_ln_tau_s: Math.sqrt(Math.max(lnTauCov[0][0], 0)), sd_ln_tau_p: Math.sqrt(Math.max(lnTauCov[1][1], 0)),
            min_eig: Math.min(...ev), max_eig: Math.max(...ev) };
 }
@@ -538,10 +516,9 @@ function derivedMetrics(fit) {
   for (let i = 1; i < N; i++) epr[i] = 0.1 * epr[i] + 0.9 * epr[i - 1];
   const arealVel = [0]; for (let i = 0; i < N - 1; i++) arealVel.push(0.5 * (Xp[i] * Xs[i + 1] - Xp[i + 1] * Xs[i]) / Math.max(dy[i], 1e-6));
   for (let i = 1; i < N; i++) arealVel[i] = 0.005 * arealVel[i] + 0.995 * arealVel[i - 1];
-  const gmin = Math.min(...fit.gain), gmax = Math.max(...fit.gain);
   return { abi, tad, rmssdFlt, rmssdObs, sdnnFlt, mABI, abiStd, nGated, pctGated: 100 * nGated / N, rmse: 1000 * Math.sqrt(r2 / N), mape: 100 * m2 / N,
-           epr, mEPR: mean(epr), arealVel, mArealVel: mean(arealVel), rmsArealVel: Math.sqrt(arealVel.reduce((s, v) => s + v * v, 0) / N), gainMin: gmin, gainMax: gmax,
-           gainMean: mean(fit.gain), sdP_ss: sdP, sdS_ss: sdS };
+           epr, mEPR: mean(epr), arealVel, mArealVel: mean(arealVel), rmsArealVel: Math.sqrt(arealVel.reduce((s, v) => s + v * v, 0) / N),
+           sdP_ss: sdP, sdS_ss: sdS };
 }
 
 /** Conventional HRV statistics of an RR series (s): mean HR, SDNN, RMSSD, pNN50, and LF/HF from the tachogram periodogram. */
@@ -823,10 +800,10 @@ function phaseSummary(fit, phases, dm) {
   const rows = phases.segments.map(seg => {
     const a = seg.from, b = Math.min(seg.to, tEnd), idx = []; for (let k = 0; k < N; k++) { const t0 = T[k] - fit.dy[k]; if (t0 >= a && t0 < b) idx.push(k); }
     if (idx.length < 5) return { name: seg.name, kind: seg.kind, n: idx.length };
-    const pick = arr => idx.map(k => arr[k]), rr = pick(fit.dy), fl = pick(fit.irr), xp = pick(fit.Xp), xs = pick(fit.Xs), g = pick(fit.gain);
+    const pick = arr => idx.map(k => arr[k]), rr = pick(fit.dy), fl = pick(fit.irr), xp = pick(fit.Xp), xs = pick(fit.Xs);
     const rm = x => { let s = 0; for (let i = 1; i < x.length; i++) s += (x[i] - x[i - 1]) ** 2; return 1000 * Math.sqrt(s / (x.length - 1)); };
     return { name: seg.name, kind: seg.kind, n: idx.length, from: a, to: Math.min(b, T[N - 1]), duration: Math.min(b, T[N - 1]) - a, hr: 60 / mean(rr), rmssdObs: rm(rr), rmssdFlt: rm(fl), xp: mean(xp), xs: mean(xs), sdXp: sd(xp), sdXs: sd(xs),
-             cu: mean(xp) / dm.sdP_ss, cv: mean(xs) / dm.sdS_ss, gain: mean(g) };
+             cu: mean(xp) / dm.sdP_ss, cv: mean(xs) / dm.sdS_ss };
   });
   const ref = rows.find(r => r.kind === 'rest' && r.cu != null) || rows.find(r => r.cu != null) || rows[0]; rows.forEach(r => { r.shift = (r.cu != null && ref.cu != null) ? Math.hypot(r.cu - ref.cu, r.cv - ref.cv) : NaN; });
   return rows;

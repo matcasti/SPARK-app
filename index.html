@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
 <title>SPARK – Stochastic Phase-Domain Autonomic Reconstruction Kinetics</title>
-<meta name="description" content="Client-side latent autonomic reconstruction from RR intervals (SPARK model M3G).">
+<meta name="description" content="Client-side latent autonomic reconstruction from RR intervals (SPARK model M3).">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -33,11 +33,11 @@
     <span class="spark-tag">SPARK</span>
     <div>
       <div class="spark-title">Stochastic Phase-Domain Autonomic Reconstruction Kinetics</div>
-      <div class="spark-sub">Dual OU drives &middot; causal vagal gate &middot; Morlet CWT anchor &middot; MAP (M3G) &middot; Client-side</div>
+      <div class="spark-sub">Dual OU drives &middot; Morlet CWT anchor &middot; MAP (M3) &middot; Client-side</div>
     </div>
   </div>
   <div class="tb-right">
-    <span class="model-badge" title="Model specification, identical to the R engine">M3G</span>
+    <span class="model-badge" title="Model specification, identical to the R engine">M3</span>
     <button class="btn-top primary" id="btn-run-top" disabled title="Run analysis (R)">
       <svg width="11" height="11" fill="currentColor" viewBox="0 0 16 16"><path d="M3 2.5l10 5.5-10 5.5V2.5z"/></svg><span class="lbl">Run</span>
     </button>
@@ -124,12 +124,11 @@
         <span class="parrow closed" id="arr-sim">▾</span>
       </div>
       <div class="pbody hidden" id="body-sim">
-        <div class="ctrl-hint" style="margin-bottom:10px">Re-runs the M3G filter on the loaded data with your parameter values — no re-optimization. Starts from the MAP estimate; Λ_P is the spectral anchor.</div>
+        <div class="ctrl-hint" style="margin-bottom:10px">Re-runs the M3 filter on the loaded data with your parameter values — no re-optimization. Starts from the MAP estimate; Λ_P is the spectral anchor.</div>
         <div class="ctrl-grp"><div class="ctrl-hdr"><span class="ctrl-key">κ_S</span><span class="ctrl-num" id="v-ks">—</span></div><input type="range" id="sl-ks" min="0" max="1000" value="500" data-min="0.001" data-max="0.5" data-log="1" aria-label="kappa S"></div>
         <div class="ctrl-grp"><div class="ctrl-hdr"><span class="ctrl-key">κ_P</span><span class="ctrl-num" id="v-kp">—</span></div><input type="range" id="sl-kp" min="0" max="1000" value="500" data-min="0.05" data-max="3" data-log="1" aria-label="kappa P"><div class="ctrl-hint">Must be &gt; κ_S</div></div>
         <div class="ctrl-grp"><div class="ctrl-hdr"><span class="ctrl-key">Λ_R</span><span class="ctrl-num" id="v-lr">—</span></div><input type="range" id="sl-lr" min="0" max="1000" value="500" data-min="0.00001" data-max="0.05" data-log="1" aria-label="Lambda R"></div>
         <div class="ctrl-grp"><div class="ctrl-hdr"><span class="ctrl-key">Λ_P</span><span class="ctrl-num" id="v-lp">—</span></div><input type="range" id="sl-lp" min="0" max="1000" value="500" data-min="0.05" data-max="20" data-log="1" aria-label="Lambda P"></div>
-        <div class="ctrl-grp"><div class="ctrl-hdr"><span class="ctrl-key">γ</span><span class="ctrl-num" id="v-gm">—</span></div><input type="range" id="sl-gm" min="0" max="1000" value="0" data-min="0" data-max="2" aria-label="gamma"><div class="ctrl-hint">0 = vagal gate off</div></div>
         <button class="btn btn-ghost" id="btn-sim" style="margin-bottom:8px">
           <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-4.49"/></svg>
           Reset to estimated
@@ -182,7 +181,7 @@
         <button class="tab-btn active" role="tab" data-tab="overview">Overview</button>
         <button class="tab-btn" role="tab" data-tab="signal">Signal</button>
         <button class="tab-btn" role="tab" data-tab="autonomic">Autonomic</button>
-        <button class="tab-btn" role="tab" data-tab="model">Gate &amp; Model</button>
+        <button class="tab-btn" role="tab" data-tab="model">Model</button>
         <button class="tab-btn" role="tab" data-tab="stats">Statistics</button>
         <button class="tab-btn" role="tab" data-tab="diag">Diagnostics</button>
       </nav>
@@ -190,7 +189,7 @@
       <div id="tab-overview" class="tab-panel active" role="tabpanel">
         <div class="sec">Key Estimates</div>
         <div class="metric-wrap"><div class="metric-grid" id="metric-grid"></div></div>
-        <div class="sec sec-row" style="margin-top:4px"><span>Full Parameter Report — SDE-IPFM Phase-Domain Model (M3G)</span><span id="model-pill"></span></div>
+        <div class="sec sec-row" style="margin-top:4px"><span>Full Parameter Report — SDE-IPFM Phase-Domain Model (M3)</span></div>
         <div class="pcard">
           <table class="ptable" id="param-table">
             <thead><tr><th>Parameter</th><th>Group</th><th>Estimate</th><th>SE</th><th>95% CI</th><th>Interpretation</th><th>Status</th></tr></thead>

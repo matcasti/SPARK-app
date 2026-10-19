@@ -213,12 +213,6 @@ function buildPoincare(R) {
   dsets.push({ type: 'line', label: '', data: [{ x: lo, y: lo }, { x: hi, y: hi }], borderColor: withA(c.tx3, 'AA'), borderDash: [4, 4], pointRadius: 0, borderWidth: 1 });
   mk('poincare', { type: 'scatter', data: { datasets: dsets }, options: baseOpts({ interaction: { mode: 'nearest', intersect: true }, plugins: { tooltip: { callbacks: { title: () => '', label: c => ` ${c.dataset.label}: ${c.parsed.x.toFixed(3)} → ${c.parsed.y.toFixed(3)} s` } } }, scales: { x: axisXY('RR(n) (s)', { min: lo, max: hi }), y: axisXY('RR(n+1) (s)', { min: lo, max: hi }) } }) });
 }
-function buildGain(R) {
-  const { fit } = R, c = tc(), idx = thinIdx(fit.dy.length), p = fit.params, t = pick(fit.time, idx), g = pick(fit.gain, idx);
-  const note = doc.querySelector('.cc[data-chart="gain"] .cc-note');
-  if (note) note.innerHTML = `γ = <b>${fmt(p.gamma, 4)}</b> &nbsp; <span class="pill ${p.gate_off ? 'off' : 'on'}">${p.gate_off ? 'gate off — ungated model' : 'gate on'}</span> &nbsp; τ<sub>g</sub> = ${fit.ctl.tau_g} s &nbsp; g<sub>k</sub> ∈ [${fmt(Math.min(...fit.gain), 3)}, ${fmt(Math.max(...fit.gain), 3)}]`;
-  mk('gain', { type: 'line', data: { datasets: [ln('', t.map(x => ({ x, y: 1 })), withA(c.tx3, 'AA'), { borderDash: [4, 4], borderWidth: 1 }), ln('Vagal variance gain g_k', t.map((x, i) => ({ x, y: g[i] })), c.acc, { fill: false })] }, options: timeOpts(R, 'g_k (log scale)', { scales: { y: Object.assign({ type: 'logarithmic' }, p.gate_off ? { min: 0.5, max: 2 } : {}) }, plugins: { legend: { display: false } } }), plugins: tsPlugins(R) });
-}
 function buildPartition(R) {
   const { fit } = R, pt = fit.pr.partition, c = tc(); if (!pt) return setEmpty('partition', 'No spectral partition available.');
   const keep = pt.freq.map((f, i) => i).filter(i => pt.freq[i] >= 0.01 && pt.freq[i] <= 0.5 && isFinite(pt.power[i])), P = ST.colors();
@@ -242,7 +236,7 @@ function postChart(id, xtitle, ytitle, prior, post, est, estMax) {
   const c = tc(), ds = [{ type: 'line', showLine: true, label: 'Prior', data: prior, parsing: false, borderColor: withA(c.tx2, 'DD'), backgroundColor: c.tx2, pointRadius: 0, borderWidth: 1.5 }], areas = [areaPlugin('prior' + id, prior, c.tx2, 0, '2A', '02')];
   if (post) { ds.push({ type: 'line', showLine: true, label: 'Posterior (Laplace)', data: post, parsing: false, borderColor: c.acc, backgroundColor: c.acc, pointRadius: 0, borderWidth: 2 }); areas.push(areaPlugin('post' + id, post, c.acc, 0, '55', '04')); }
   ds.push({ type: 'line', showLine: true, label: 'MAP estimate', data: [{ x: est, y: 0 }, { x: est, y: estMax }], borderColor: c.amb, borderDash: [4, 3], pointRadius: 0, borderWidth: 1.6 });
-  mk(id, { type: 'scatter', data: { datasets: ds }, options: baseOpts({ scales: { x: axisXY(xtitle, { type: id === 'pp-gamma' ? 'linear' : 'logarithmic' }), y: axisXY(ytitle, { min: 0 }) }, plugins: { tooltip: { callbacks: { title: it => xtitle + ' = ' + Number(it[0].parsed.x).toPrecision(3) } } } }), plugins: [crosshair].concat(areas) });
+  mk(id, { type: 'scatter', data: { datasets: ds }, options: baseOpts({ scales: { x: axisXY(xtitle, { type: 'logarithmic' }), y: axisXY(ytitle, { min: 0 }) }, plugins: { tooltip: { callbacks: { title: it => xtitle + ' = ' + Number(it[0].parsed.x).toPrecision(3) } } } }), plugins: [crosshair].concat(areas) });
 }
 function buildTauPost(which) {
   return R => {
@@ -255,10 +249,6 @@ function buildTauPost(which) {
 function buildJitterPost(R) {
   const { fit } = R, pr = fit.pr, xs = Array.from({ length: 161 }, (_, i) => pr.log_jit_mu - 3.6 * pr.sigma_log_jit + 7.2 * pr.sigma_log_jit * i / 160), est = fit.params.rr_jitter_ms;
   const prior = xs.map(x => ({ x: Math.exp(x) * 1000, y: normalPdf(x, pr.log_jit_mu, pr.sigma_log_jit) })); postChart('pp-jit', 'RR timing jitter (ms)', 'Density per ln s', prior, null, est, Math.max(...prior.map(d => d.y)));
-}
-function buildGammaPost(R) {
-  const { fit } = R, pr = fit.pr, q99 = pr.gamma_prior_scale * (Math.pow(0.01, -1 / pr.gamma_prior_shape) - 1), xmax = Math.max(q99, fit.params.gamma * 1.5, 0.05), f = g => pr.gamma_prior_shape / pr.gamma_prior_scale * Math.pow(1 + g / pr.gamma_prior_scale, -(pr.gamma_prior_shape + 1));
-  const prior = Array.from({ length: 201 }, (_, i) => ({ x: xmax * i / 200, y: f(xmax * i / 200) })); postChart('pp-gamma', 'γ', 'Prior density (Lomax)', prior, null, fit.params.gamma, f(0));
 }
 function buildEllipse(R) {
   const { fit, rep } = R, c = tc(), pr = fit.pr, ls = Math.log(1 / fit.params.ks), lp = Math.log(1 / fit.params.kp), dsl = [];
@@ -336,24 +326,22 @@ function buildPhaseTable(R) {
 }
 function buildCorrMatrix(R) {
   const { rep } = R, body = doc.querySelector('.cc[data-chart="corrmat"] .cc-body'); if (!rep) { body.innerHTML = '<div class="empty-card">Enable “Standard errors and Laplace posterior” in Settings → Analysis.</div>'; return; }
-  const names = ['κ_S', 'κ_P', 'Λ_R', 'γ'], C = rep.physCov, r = (i, j) => C[i][j] / Math.sqrt(Math.max(C[i][i], 1e-300) * Math.max(C[j][j], 1e-300));
+  const names = ['κ_S', 'κ_P', 'Λ_R'], C = rep.physCov, r = (i, j) => C[i][j] / Math.sqrt(Math.max(C[i][i], 1e-300) * Math.max(C[j][j], 1e-300));
   const color = v => { const a = Math.min(1, Math.abs(v)); return v >= 0 ? `rgba(${Math.round(60 + 180 * a)},${Math.round(100 - 40 * a)},${Math.round(90 - 40 * a)},${0.22 + 0.7 * a})` : `rgba(${Math.round(50 - 20 * a)},${Math.round(120 + 40 * a)},${Math.round(210 + 20 * a)},${0.22 + 0.7 * a})`; };
-  let h = `<div class="corr-grid" style="grid-template-columns:42px repeat(4,1fr)"><div></div>${names.map(n => `<div class="corr-lbl">${n}</div>`).join('')}`;
-  for (let i = 0; i < 4; i++) { h += `<div class="corr-lbl">${names[i]}</div>`; for (let j = 0; j < 4; j++) { const v = r(i, j); h += `<div class="corr-cell" style="background:${color(v)}" title="${names[i]} vs ${names[j]}">${isFinite(v) ? v.toFixed(2) : '—'}</div>`; } }
+  let h = `<div class="corr-grid" style="grid-template-columns:42px repeat(3,1fr)"><div></div>${names.map(n => `<div class="corr-lbl">${n}</div>`).join('')}`;
+  for (let i = 0; i < 3; i++) { h += `<div class="corr-lbl">${names[i]}</div>`; for (let j = 0; j < 3; j++) { const v = r(i, j); h += `<div class="corr-cell" style="background:${color(v)}" title="${names[i]} vs ${names[j]}">${isFinite(v) ? v.toFixed(2) : '—'}</div>`; } }
   body.innerHTML = h + `</div><div class="se-note">Correlation of the MAP estimates (inverse numerical Hessian, delta method). Hessian eigenvalue range ${rep.min_eig.toExponential(1)} … ${rep.max_eig.toExponential(1)}${rep.min_eig <= 0 ? ' — not positive definite: SEs are approximate' : ''}.</div>`;
 }
 
 function buildPostSummary(R) {
   const { fit, rep } = R, pr = fit.pr, p = fit.params, body = doc.querySelector('.cc[data-chart="postsummary"] .cc-body'), z = 1.96, f = (a, b, d) => `${a.toFixed(d)} – ${b.toFixed(d)}`;
   const tau = (name, tauHat, lo, hi, sdPost, sdPrior) => `<tr><td>${name}</td><td>${f(lo, hi, 1)}</td><td>${tauHat.toFixed(2)}</td><td>${rep ? f(tauHat * Math.exp(-z * sdPost), tauHat * Math.exp(z * sdPost), 2) : '—'}</td><td>${rep ? (sdPost / sdPrior).toFixed(2) : '—'}</td></tr>`;
-  const q95 = pr.gamma_prior_scale * (Math.pow(0.05, -1 / pr.gamma_prior_shape) - 1);
   body.innerHTML = `<table class="stat-table"><thead><tr><th>Parameter</th><th>Prior 95% range</th><th>Estimate (MAP)</th><th>Posterior 95% range</th><th>Posterior / prior SD</th></tr></thead><tbody>
     ${tau('τ_P (s)', 1 / p.kp, pr.tau_p_bounds[0], pr.tau_p_bounds[1], rep && rep.sd_ln_tau_p, pr.sigma_log_tau_p)}
     ${tau('τ_S (s)', 1 / p.ks, pr.tau_s_bounds[0], pr.tau_s_bounds[1], rep && rep.sd_ln_tau_s, pr.sigma_log_tau_s)}
     <tr><td>RR jitter (ms)</td><td>${f(pr.jitter_bounds_ms[0], pr.jitter_bounds_ms[1], 1)}</td><td>${p.rr_jitter_ms.toFixed(2)}</td><td>—</td><td>—</td></tr>
-    <tr><td>γ (vagal gate)</td><td>0 – ${q95.toFixed(2)}</td><td>${p.gamma.toFixed(5)}${p.gate_off ? ' (off)' : ''}</td><td>—</td><td>—</td></tr>
     <tr><td>V_P / V_S</td><td colspan="2">fixed by the spectral anchor: ${fit.pr.energy_ratio.toFixed(3)}</td><td>—</td><td>—</td></tr></tbody></table>
-    <div class="se-note">Posterior ranges are the Laplace approximation (normal in ln τ). A ratio well below 1 means the data narrowed the prior; close to 1 means the prior is doing the work. γ and the jitter have no Laplace range here (γ sits at the boundary when the gate is off).</div>`;
+    <div class="se-note">Posterior ranges are the Laplace approximation (normal in ln τ). A ratio well below 1 means the data narrowed the prior; close to 1 means the prior is doing the work. The jitter has no Laplace range here.</div>`;
 }
 
 /* ---- canvas cards: CWT scalogram and state-space landscape ------------------------------------------------------------------ */
@@ -621,15 +609,13 @@ const CARDS = [
   { id: 'totaldrive', tab: 'autonomic', title: 'Total drive magnitude', sub: 'Euclidean norm of the two drives', tip: 'c-tdrive', h: 250, span: 6, build: R => areaChart('totaldrive', R, R.dm.tad, 'Total drive ‖x‖', tc().amb, '‖x‖ (Hz)', { min: 0 }) },
   { id: 'epr', tab: 'autonomic', title: 'Entropy production rate', sub: 'Instantaneous allostatic-cost proxy', tip: 'c-epr', h: 250, span: 6, build: R => signedChart('epr', R, R.dm.epr, 'Load (ṡ > 0)', 'Recovery (ṡ < 0)', 'Entropy production rate ṡ(t)', tc().pur, 'ṡ(t)  (s⁻¹)') },
   { id: 'arealvel', tab: 'autonomic', title: 'Phase-plane areal velocity', sub: 'Instantaneous rotation rate of the trajectory', tip: 'c-avel', h: 250, span: 6, build: R => signedChart('arealvel', R, R.dm.arealVel, 'Counter-clockwise (+)', 'Clockwise (−)', 'Areal velocity dA/dt', tc().grn, 'dA/dt (Hz²·s⁻¹)') },
-  { id: 'gain', tab: 'model', title: 'Causal vagal variance gate', sub: 'Multiplier g_k of the vagal drive variance at each beat', tip: 'c-gain', h: 260, span: 12, note: true, build: buildGain },
   { id: 'partition', tab: 'model', title: 'Spectral anchor', sub: 'Logistic vagal / sympathetic split of the wavelet power', tip: 'c-part', h: 280, span: 6, note: true, build: buildPartition },
   { id: 'ellipse', tab: 'model', title: 'τ_P – τ_S regions', sub: 'Prior and Laplace posterior (50% and 95%)', tip: 'c-ell', h: 280, span: 6, build: buildEllipse },
   { id: 'pp-taup', tab: 'model', title: 'Vagal time constant τ_P', sub: 'Prior versus posterior', tip: 'c-pp', h: 220, span: 6, build: buildTauPost('p') },
   { id: 'pp-taus', tab: 'model', title: 'Sympathetic time constant τ_S', sub: 'Prior versus posterior', tip: 'c-pp', h: 220, span: 6, build: buildTauPost('s') },
   { id: 'pp-jit', tab: 'model', title: 'RR timing jitter', sub: 'Prior versus estimate', tip: 'c-pp', h: 220, span: 6, build: buildJitterPost },
-  { id: 'pp-gamma', tab: 'model', title: 'Gate gain γ', sub: 'Lomax prior versus estimate', tip: 'c-pp', h: 220, span: 6, build: buildGammaPost },
-  { id: 'corrmat', tab: 'model', title: 'Parameter correlation', sub: 'κ_S, κ_P, Λ_R, γ (inverse Hessian)', tip: 'c-corr', kind: 'html', span: 6, build: buildCorrMatrix },
-  { id: 'postsummary', tab: 'model', title: 'Prior and posterior summary', sub: 'What the data added to each prior', tip: 'c-post', kind: 'html', span: 6, build: buildPostSummary },
+  { id: 'corrmat', tab: 'model', title: 'Parameter correlation', sub: 'κ_S, κ_P, Λ_R (inverse Hessian)', tip: 'c-corr', kind: 'html', span: 6, build: buildCorrMatrix },
+  { id: 'postsummary', tab: 'model', title: 'Prior and posterior summary', sub: 'What the data added to each prior', tip: 'c-post', kind: 'html', span: 12, build: buildPostSummary },
   { id: 'hrvtable', tab: 'stats', title: 'Conventional HRV statistics', sub: 'Observed versus model-filtered RR', tip: 'c-hrv', kind: 'html', h: 300, span: 6, build: buildHRVTable },
   { id: 'rolling', tab: 'stats', title: 'Rolling statistics', sub: 'Sliding-window heart rate, SDNN or RMSSD', tip: 'c-roll', h: 300, span: 6, select: [['hr', 'Heart rate'], ['sdnn', 'SDNN'], ['rmssd', 'RMSSD']], build: buildRolling },
   { id: 'phasehrv', tab: 'stats', title: 'Conventional statistics per window', sub: 'Observed and filtered HRV in each phase, with the whole recording for reference', tip: 'c-phhrv', kind: 'html', span: 12, build: buildPhaseHRV },
@@ -693,7 +679,7 @@ function setHidden(id, hidden) { const m = Object.assign({}, ST.get('charts.hidd
    synchronously (tests, exports). */
 const _dirty = new Set(); let _tok = 0, _loop = Promise.resolve();
 const NEEDS = { cwt: ['cwt'], psd: ['psd'], landscape: ['land'], hrvtable: ['hrvObs', 'hrvFlt'], rolling: ['roll'] };           // derived data that a worker may still be preparing
-const PHASE_CARDS = ['rr', 'states', 'phase', 'landscape', 'phasetable', 'abi', 'totaldrive', 'epr', 'arealvel', 'gain', 'poincare', 'rolling', 'cwt'];
+const PHASE_CARDS = ['rr', 'states', 'phase', 'landscape', 'phasetable', 'abi', 'totaldrive', 'epr', 'arealvel', 'poincare', 'rolling', 'cwt'];
 const isHidden = id => !!ST.get('charts.hidden')[id];
 const activeTab = () => { const p = doc.querySelector('.tab-panel.active'); return p ? p.id.replace('tab-', '') : null; };
 const nextTask = () => new Promise(r => setTimeout(r, 0));
@@ -761,7 +747,7 @@ function buildAll(R, only) {
   invalidate(); return ensureTab(activeTab());
 }
 /** Phases changed. Charts whose plugin reads the phases at draw time just need a redraw; the others are rebuilt (visible tab now, the rest when opened). */
-const PHASE_REDRAW = ['rr', 'states', 'abi', 'totaldrive', 'epr', 'arealvel', 'gain', 'rolling'], PHASE_REBUILD = ['phase', 'poincare', 'phasetable', 'phasehrv', 'cwt', 'landscape'];
+const PHASE_REDRAW = ['rr', 'states', 'abi', 'totaldrive', 'epr', 'arealvel', 'rolling'], PHASE_REBUILD = ['phase', 'poincare', 'phasetable', 'phasehrv', 'cwt', 'landscape'];
 function refreshPhases() {
   PHASE_REDRAW.forEach(id => { const ch = _ch[id]; if (ch && !_dirty.has(id) && ch.canvas.offsetParent !== null) { try { ch.draw(); } catch (e) { invalidate([id]); } } else invalidate([id]); });
   invalidate(PHASE_REBUILD); return ensureTab(activeTab());

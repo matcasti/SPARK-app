@@ -22,7 +22,7 @@ self.onmessage = function (ev) {
   const m = ev.data, E = self.SparkEngine, post = (type, extra) => self.postMessage(Object.assign({ id: m.id, type }, extra));
   try {
     const a = m.args; post('progress', { msg: 'Extracting Morlet CWT spectral anchor…', pct: 8 }); const pr = stageAnchor(E, a);
-    post('progress', { msg: 'Running 4-D BFGS (M3G: causal vagal gate, γ)…', pct: 25 }); const fit = stageFit(E, a, pr);
+    post('progress', { msg: 'Running 3-D BFGS (M3)…', pct: 25 }); const fit = stageFit(E, a, pr);
     post('progress', { msg: a.computeSE ? 'Hessian, standard errors and Laplace posterior…' : 'Computing statistics…', pct: 62 }); const rep = stageRep(E, a, fit);
     const d = stageDerived(E, a, fit); post('done', { out: { fit: fit, rep: rep, dm: d.dm, diag: d.diag } });
     post('extras', { extras: stageExtras(E, a, fit, d.dm) });
@@ -55,7 +55,7 @@ function analyze(args, onProgress) {
   const main = () => {            // fallback: same stages on the main thread, yielding between them so that the progress text can paint
     const done = (async () => {
       onProgress && onProgress('Extracting Morlet CWT spectral anchor…', 8); await tick(); const pr = stageAnchor(E, args);
-      onProgress && onProgress('Running 4-D BFGS (M3G: causal vagal gate, γ)…', 25); await tick(); const fit = stageFit(E, args, pr);
+      onProgress && onProgress('Running 3-D BFGS (M3)…', 25); await tick(); const fit = stageFit(E, args, pr);
       onProgress && onProgress(args.computeSE ? 'Hessian, standard errors and Laplace posterior…' : 'Computing statistics…', 62); await tick(); let rep = null; try { rep = stageRep(E, args, fit); } catch (e) { console.warn('SE failed', e); }
       const d = stageDerived(E, args, fit);
       setTimeout(() => { try { resolveExtras(stageExtras(E, args, fit, d.dm)); } catch (e) { resolveExtras(null); } }, 0);       // derived spectra etc. are computed lazily by the app if needed first

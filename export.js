@@ -36,14 +36,12 @@ function paramRows(fit, rep) {
     row('τ_S', 'Kinetic', 'g-kin', 'Sympathetic e-folding time 1/κ_S (s)', 'Derived — MAP', 1 / p.ks, se.tau_s),
     row('τ_P', 'Kinetic', 'g-kin', 'Parasympathetic e-folding time 1/κ_P (s)', 'Derived — MAP', 1 / p.kp, se.tau_p),
     row('σ_S', 'Volatility', 'g-vol', 'Sympathetic drive amplitude', 'Profiled — GLS', p.sigS),
-    row('σ_P', 'Volatility', 'g-vol', 'Baseline (g = 1) vagal drive amplitude', 'Derived — spectral', p.sigP),
-    row('γ', 'Vagal gain', 'g-vg', 'Variance-gain coefficient ≥ 0 (≈ 0: gate off, ungated model)' + (p.gate_off ? ' — gate OFF' : ''), 'Estimated — MAP (log link)', p.gamma, se.gamma),
+    row('σ_P', 'Volatility', 'g-vol', 'Vagal drive amplitude', 'Derived — spectral', p.sigP),
     row('Λ_P', 'Ratio', 'g-rat', 'V_P/V_S: logistic CWT partition (Parseval anchor)', 'Fixed — spectral', p.lp),
     row('Λ_R', 'Ratio', 'g-rat', 'Noise-to-signal ratio from SA node threshold jitter', 'Estimated — MAP', p.lR, se.lR),
     row('Jitter', 'Ratio', 'g-rat', 'Equivalent RR timing jitter SD at the median RR (ms)', 'Derived — MAP', p.rr_jitter_ms),
     row('θ_jump', 'Robustness', 'g-rob', 'Relative RR jump threshold of the artifact gate', 'Fixed — setting', ctl.jump_threshold),
-    row('p_jump', 'Robustness', 'g-rob', 'Steepness of the artifact gate', 'Fixed — setting', ctl.jump_power),
-    row('τ_g', 'Vagal gain', 'g-vg', 'Low-pass time constant feeding the vagal gate (s)', 'Fixed — setting', ctl.tau_g)
+    row('p_jump', 'Robustness', 'g-rob', 'Steepness of the artifact gate', 'Fixed — setting', ctl.jump_power)
   ];
 }
 
@@ -65,7 +63,7 @@ function compose(id, scaleIn) {
   g.fillStyle = dark ? '#C8D8EC' : '#0C1E30'; g.font = `600 ${Math.round(11.5 * scale)}px -apple-system,Segoe UI,sans-serif`; g.textBaseline = 'middle'; g.fillText(cardTitle(id), Math.round(10 * scale), pad / 2);
   g.drawImage(src, 0, pad);
   g.fillStyle = dark ? '#507098' : '#486888'; g.font = `${Math.round(8.5 * scale)}px -apple-system,Segoe UI,sans-serif`;
-  g.fillText(`SPARK M3G · ${slug(ctx.label)}${ctx.fit ? ' · ' + ctx.fit.dy.length + ' beats' : ''}`, Math.round(10 * scale), pad + h + foot / 2);
+  g.fillText(`SPARK M3 · ${slug(ctx.label)}${ctx.fit ? ' · ' + ctx.fit.dy.length + ' beats' : ''}`, Math.round(10 * scale), pad + h + foot / 2);
   if (restore) restore();
   return out;
 }
@@ -109,8 +107,8 @@ function parametersCSV() {
   download(csv(['parameter', 'group', 'estimate', 'se', 'ci95_low', 'ci95_high', 'status', 'interpretation'], rows.concat(extra)), fname('parameters', 'csv'), 'text/csv'); toast('Saved parameters CSV', 'ok');
 }
 function beatsCSV() {
-  const f = ctx.fit, h = ['beat', 'time_s', 'rr_observed_s', 'rr_filtered_s', 'rr_filtered_lo95', 'rr_filtered_hi95', 'x_p_hz', 'x_p_se', 'x_s_hz', 'x_s_se', 'vagal_gain', 'artifact_multiplier', 'innovation', 'innovation_diagnostic'], rows = [];
-  for (let i = 0; i < f.dy.length; i++) { const sr = Math.sqrt(Math.max(f.rrV[i], 0)); rows.push([i + 1, nfix(f.time[i], 4), nfix(f.dy[i], 5), nfix(f.irr[i], 5), nfix(f.irr[i] - 1.96 * sr, 5), nfix(f.irr[i] + 1.96 * sr, 5), nf(f.Xp[i], 7), nf(Math.sqrt(Math.max(f.XpV[i], 0)), 6), nf(f.Xs[i], 7), nf(Math.sqrt(Math.max(f.XsV[i], 0)), 6), nf(f.gain[i], 6), nf(f.gate[i], 6), nf(f.innovations[i], 6), nf(f.innovations_diagnostic[i], 6)]); }
+  const f = ctx.fit, h = ['beat', 'time_s', 'rr_observed_s', 'rr_filtered_s', 'rr_filtered_lo95', 'rr_filtered_hi95', 'x_p_hz', 'x_p_se', 'x_s_hz', 'x_s_se', 'artifact_multiplier', 'innovation', 'innovation_diagnostic'], rows = [];
+  for (let i = 0; i < f.dy.length; i++) { const sr = Math.sqrt(Math.max(f.rrV[i], 0)); rows.push([i + 1, nfix(f.time[i], 4), nfix(f.dy[i], 5), nfix(f.irr[i], 5), nfix(f.irr[i] - 1.96 * sr, 5), nfix(f.irr[i] + 1.96 * sr, 5), nf(f.Xp[i], 7), nf(Math.sqrt(Math.max(f.XpV[i], 0)), 6), nf(f.Xs[i], 7), nf(Math.sqrt(Math.max(f.XsV[i], 0)), 6), nf(f.gate[i], 6), nf(f.innovations[i], 6), nf(f.innovations_diagnostic[i], 6)]); }
   download(csv(h, rows), fname('beats', 'csv'), 'text/csv'); toast('Saved per-beat CSV (' + rows.length + ' rows)', 'ok');
 }
 function phasesCSV() {
@@ -130,11 +128,11 @@ function filteredRR(unit, fmt) {
 }
 function sessionObject(withData) {
   const f = ctx.fit, rep = ctx.rep, diag = ctx.diag, dm = ctx.dm;
-  return { spark_session: 3, created: new Date().toISOString(), model: 'M3G (engine 01_model_engine.R)', data: { label: ctx.label, beats: f.dy.length, duration_s: f.time[f.time.length - 1], read_as: ctx.read ? { unit: ctx.read.unit, unit_source: ctx.read.unitSource, kind: ctx.read.kind, column: ctx.read.column, delimiter: ctx.read.delimiter, decimal_comma: ctx.read.decimalComma } : 'built-in example', rr_s: withData ? Array.from(f.dy) : undefined },
+  return { spark_session: 3, created: new Date().toISOString(), model: 'M3 (engine model_engine.R)', data: { label: ctx.label, beats: f.dy.length, duration_s: f.time[f.time.length - 1], read_as: ctx.read ? { unit: ctx.read.unit, unit_source: ctx.read.unitSource, kind: ctx.read.kind, column: ctx.read.column, delimiter: ctx.read.delimiter, decimal_comma: ctx.read.decimalComma } : 'built-in example', rr_s: withData ? Array.from(f.dy) : undefined },
     settings: { priors: ST.get('model.priors'), control: ST.get('model.control'), changed_from_app_defaults: ST.modelDiff(), changed_from_r_engine_defaults: ST.modelDiffVsEngine() },
     spectral_anchor: { energy_ratio: f.pr.energy_ratio, p_lf: f.pr.p_lf, p_hf: f.pr.p_hf, nu0_init: f.pr.nu0_init },
     parameters: paramRows(f, rep).map(r => ({ name: r.n, estimate: r.est, se: isFinite(r.se) ? r.se : null, ci95: isFinite(r.lo) ? [r.lo, r.hi] : null, status: r.status })),
-    fit: { LL_star: f.LL_star, objective: f.opt ? f.opt.value : null, bfgs_counts: f.opt ? f.opt.counts : null, converged: f.opt ? f.opt.convergence === 0 : null, gate_off: f.params.gate_off, gain_range: [dm.gainMin, dm.gainMax], rr_jitter_ms: f.params.rr_jitter_ms, rmse_ms: dm.rmse, mape_pct: dm.mape, pct_artifact_gated: dm.pctGated },
+    fit: { LL_star: f.LL_star, objective: f.opt ? f.opt.value : null, bfgs_counts: f.opt ? f.opt.counts : null, converged: f.opt ? f.opt.convergence === 0 : null, rr_jitter_ms: f.params.rr_jitter_ms, rmse_ms: dm.rmse, mape_pct: dm.mape, pct_artifact_gated: dm.pctGated },
     posterior: rep ? { sd_ln_tau_s: rep.sd_ln_tau_s, sd_ln_tau_p: rep.sd_ln_tau_p, hessian_eig_range: [rep.min_eig, rep.max_eig] } : null,
     diagnostics: diag ? { n_retained: diag.N, n_total: diag.N_total, ks_D: diag.ks.D, ks_p: diag.ks.p, ks_bound: diag.ks_bound, pacf_violations: diag.pacf_violations, pacf_lags: diag.pacf.length, skew: diag.skew, excess_kurtosis: diag.kurt } : null,
     hrv: { observed: ctx.bundle ? ctx.bundle.hrvObs : null, filtered: ctx.bundle ? ctx.bundle.hrvFlt : null, per_window: ctx.bundle ? ctx.bundle.phaseHRV : null }, phases: ctx.events ? { source: ctx.events.source, params: ctx.events.params, segments: ctx.events.segments, boundaries: ctx.events.boundaries, summary: ctx.phases } : null,
@@ -146,10 +144,10 @@ function sessionJSON() { download(JSON.stringify(sessionObject(true), null, 2), 
 function rScript() {
   const f = ctx.fit, diff = ST.modelDiffVsEngine(), arg = o => Object.keys(o).map(k => { const v = o[k]; return `  ${k} = ${Array.isArray(v) ? 'c(' + v.join(', ') + ')' : v}`; }).join(',\n');
   const rr = Array.from(f.dy, v => String(v)).join(', ');   // full precision: the R fit reproduces the browser fit
-  const code = `# SPARK M3G -- reproduces the fit of "${ctx.label}" with the same settings (generated ${new Date().toISOString()})
-# Needs 01_model_engine.R and the packages biwavelet, numDeriv, MASS, ggplot2, patchwork.
+  const code = `# SPARK M3 -- reproduces the fit of "${ctx.label}" with the same settings (generated ${new Date().toISOString()})
+# Needs model_engine.R and the packages biwavelet, numDeriv, MASS, ggplot2, patchwork.
 suppressPackageStartupMessages({ library(biwavelet); library(numDeriv); library(MASS); library(ggplot2); library(patchwork) })
-source("01_model_engine.R")
+source("model_engine.R")
 
 rr <- c(${rr})   # RR intervals (s)
 
@@ -161,7 +159,7 @@ report_model(fit)
 print(visualize_model(fit))
 print(diagnose_model(fit))
 
-# Expected (browser app): LL* = ${f.LL_star.toFixed(4)}, kappa_S = ${f.params.ks.toPrecision(6)}, kappa_P = ${f.params.kp.toPrecision(6)}, gamma = ${f.params.gamma.toPrecision(4)}, V_P/V_S = ${f.pr.energy_ratio.toPrecision(6)}
+# Expected (browser app): LL* = ${f.LL_star.toFixed(4)}, kappa_S = ${f.params.ks.toPrecision(6)}, kappa_P = ${f.params.kp.toPrecision(6)}, V_P/V_S = ${f.pr.energy_ratio.toPrecision(6)}
 `;
   download(code, fname('reproduce', 'R'), 'text/plain'); toast('Saved R script', 'ok');
 }
@@ -178,16 +176,16 @@ async function reportHTML() {
 table{border-collapse:collapse;width:100%;font-size:.82rem}th,td{border-bottom:1px solid #e3e9f3;padding:5px 8px;text-align:left}th{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#486888}td.n{font-family:ui-monospace,Consolas,monospace;text-align:right}
 .meta{color:#486888;font-size:.8rem}figure{margin:14px 0;break-inside:avoid}figure img{max-width:100%;border:1px solid #e3e9f3;border-radius:6px}figcaption{font-size:.72rem;color:#486888}code{font-family:ui-monospace,Consolas,monospace;font-size:.78rem}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}.k{border:1px solid #e3e9f3;border-radius:8px;padding:6px 10px}.k b{display:block;font-family:ui-monospace,monospace;font-size:1rem}.k span{font-size:.68rem;color:#486888;text-transform:uppercase}
 @media print{figure,table{break-inside:avoid}}</style></head><body>
-<h1>SPARK — stochastic phase-domain autonomic reconstruction</h1><div class="meta">Model M3G · ${esc(ctx.label)} · ${f.dy.length} beats · ${n(f.time[f.time.length - 1], 6)} s · ${new Date().toLocaleString()}</div>
-<h2>Key estimates</h2><div class="grid">${[['Heart rate (ν₀)', n(f.params.nu0 * 60, 4) + ' bpm'], ['τ_S', n(1 / f.params.ks, 4) + ' s'], ['τ_P', n(1 / f.params.kp, 3) + ' s'], ['γ', n(f.params.gamma, 3) + (f.params.gate_off ? ' (off)' : '')], ['V_P/V_S', n(f.pr.energy_ratio, 4)], ['RMSSD filtered', n(dm.rmssdFlt, 4) + ' ms'], ['Fit RMSE', n(dm.rmse, 3) + ' ms'], ['LL*', n(f.LL_star, 6)]].map(([k, v]) => `<div class="k"><span>${k}</span><b>${v}</b></div>`).join('')}</div>
+<h1>SPARK — stochastic phase-domain autonomic reconstruction</h1><div class="meta">Model M3 · ${esc(ctx.label)} · ${f.dy.length} beats · ${n(f.time[f.time.length - 1], 6)} s · ${new Date().toLocaleString()}</div>
+<h2>Key estimates</h2><div class="grid">${[['Heart rate (ν₀)', n(f.params.nu0 * 60, 4) + ' bpm'], ['τ_S', n(1 / f.params.ks, 4) + ' s'], ['τ_P', n(1 / f.params.kp, 3) + ' s'], ['V_P/V_S', n(f.pr.energy_ratio, 4)], ['RMSSD filtered', n(dm.rmssdFlt, 4) + ' ms'], ['Fit RMSE', n(dm.rmse, 3) + ' ms'], ['LL*', n(f.LL_star, 6)]].map(([k, v]) => `<div class="k"><span>${k}</span><b>${v}</b></div>`).join('')}</div>
 <h2>Parameters</h2><table><thead><tr><th>Parameter</th><th>Estimate</th><th>SE</th><th>95% CI</th><th>Status</th><th>Interpretation</th></tr></thead><tbody>${pr.map(r => `<tr><td>${esc(r.n)}</td><td class="n">${n(r.est, 6)}</td><td class="n">${isFinite(r.se) ? n(r.se, 3) : '—'}</td><td class="n">${isFinite(r.lo) ? '[' + n(r.lo, 4) + ', ' + n(r.hi, 4) + ']' : '—'}</td><td>${esc(r.status)}</td><td>${esc(r.interp)}</td></tr>`).join('')}</tbody></table>
 ${diag ? `<h2>Diagnostics</h2><div class="grid"><div class="k"><span>KS p</span><b>${n(diag.ks.p, 3)}</b></div><div class="k"><span>KS D</span><b>${n(diag.ks.D, 3)}</b></div><div class="k"><span>PACF violations</span><b>${diag.pacf_violations}/${diag.pacf.length}</b></div><div class="k"><span>Beats retained</span><b>${diag.N}/${diag.N_total}</b></div></div>` : ''}
 ${ctx.phases ? `<h2>Phases</h2><table><thead><tr><th>Phase</th><th>Duration (s)</th><th>HR (bpm)</th><th>RMSSD (ms)</th><th>mean x_p</th><th>mean x_s</th><th>Shift (σ)</th></tr></thead><tbody>${ctx.phases.map(r => r.n < 5 ? '' : `<tr><td>${r.name}</td><td class="n">${n(r.duration, 4)}</td><td class="n">${n(r.hr, 4)}</td><td class="n">${n(r.rmssdObs, 3)}</td><td class="n">${n(r.xp, 3)}</td><td class="n">${n(r.xs, 3)}</td><td class="n">${n(r.shift, 3)}</td></tr>`).join('')}</tbody></table>` : ''}
 <h2>HRV statistics</h2><table><thead><tr><th>Metric</th><th>Observed</th><th>Filtered</th></tr></thead><tbody>${[['Mean HR (bpm)', 'meanHR'], ['SDNN (ms)', 'SDNN'], ['RMSSD (ms)', 'RMSSD'], ['pNN50 (%)', 'pNN50'], ['LF (ms²)', 'LF'], ['HF (ms²)', 'HF'], ['LF/HF', 'LFHF']].map(([l, k]) => `<tr><td>${l}</td><td class="n">${n(ctx.bundle.hrvObs[k], 4)}</td><td class="n">${n(ctx.bundle.hrvFlt[k], 4)}</td></tr>`).join('')}</tbody></table>
 ${ctx.bundle && ctx.bundle.phaseHRV ? `<h2>Conventional statistics per window</h2><table><thead><tr><th>Window</th><th>Signal</th><th>HR</th><th>SDNN</th><th>RMSSD</th><th>pNN50</th><th>LF</th><th>HF</th><th>LF/HF</th></tr></thead><tbody>${ctx.bundle.phaseHRV.filter(r => r.obs).map(r => ['obs', 'flt'].map(k => `<tr><td>${k === 'obs' ? esc(r.name) : ''}</td><td>${k === 'obs' ? 'observed' : 'filtered'}</td><td class="n">${n(r[k].meanHR, 4)}</td><td class="n">${n(r[k].SDNN, 4)}</td><td class="n">${n(r[k].RMSSD, 4)}</td><td class="n">${n(r[k].pNN50, 3)}</td><td class="n">${n(r[k].LF, 4)}</td><td class="n">${n(r[k].HF, 4)}</td><td class="n">${n(r[k].LFHF, 3)}</td></tr>`).join('')).join('')}</tbody></table>` : ''}
-${X().includeSettings ? `<h2>Model settings</h2><p class="meta">${changed.length ? 'Changed from the engine defaults: <code>' + esc(JSON.stringify(diff)) + '</code>' : 'Engine defaults (M3G).'}</p>` : ''}
+${X().includeSettings ? `<h2>Model settings</h2><p class="meta">${changed.length ? 'Changed from the engine defaults: <code>' + esc(JSON.stringify(diff)) + '</code>' : 'Engine defaults (M3).'}</p>` : ''}
 <h2>Charts</h2>${imgs.map(i => `<figure><img src="${i.src}" alt="${esc(i.title)}"><figcaption>${esc(i.title)}</figcaption></figure>`).join('')}
-<p class="meta">Generated by the SPARK browser app. Reproduce with the exported R script (01_model_engine.R).</p></body></html>`;
+<p class="meta">Generated by the SPARK browser app. Reproduce with the exported R script (model_engine.R).</p></body></html>`;
   download(html, fname('report', 'html'), 'text/html'); toast('Saved HTML report (open it and use Print → PDF)', 'ok');
 }
 
