@@ -291,6 +291,18 @@ const text = async blob => Buffer.from(await blob.arrayBuffer()).toString('utf8'
     $('btn-settings').click(); await sleep(120); Array.from(w.document.querySelectorAll('#settings-modal .set-nav button')).find(b => /^model/i.test(b.textContent.trim())).click(); await sleep(80);
     const pr = Array.from(w.document.querySelectorAll('#settings-modal .pair')).filter(e => e.querySelector('button')); check('spacing: the preset and settings-file buttons in Settings are laid out as wrapping rows with an 8 px gap (they used to touch)', pr.length >= 1 && pr.every(e => e.style.display === 'flex' && e.style.gap === '8px'), pr.length + ' rows');
     w.document.getElementById('settings-modal').classList.remove('show'); }
+  // ---- robustness: an older (cached) settings.js without the Live and ui sections must not break the interface (reported: "Cannot read properties of undefined (reading 'fitWindowMin')")
+  { const st = ST.all(), keep = { live: st.live, ui: st.ui }, e0 = errors.length; delete st.live; delete st.ui; let threw = null;
+    try { w.SPARK.live.setMode('analysis'); w.SPARK.live.setMode('live'); w.SparkSettings.set('appearance.reduceMotion', false); } catch (e) { threw = e; }
+    check('older settings file without the Live section: the Live controls show the built-in defaults and nothing throws', !threw && $('live-win').value === '10' && $('live-refit').value === '15' && $('live-chartwin').value === '5' && $('live-clean').checked === false && errors.length === e0, threw ? String(threw) : '');
+    $('live-win').value = '7'; $('live-win').dispatchEvent(new w.Event('change')); await sleep(30);
+    check('older settings file: changing a Live control recreates the section and the value is kept', ST.get('live.fitWindowMin') === 7 && ST.get('live.refitEveryS') === 15);
+    let thr2 = null; try { w.SparkWelcome.open(); $('wm-never').checked = true; w.SparkWelcome.close(); } catch (e) { thr2 = e; }
+    check('older settings file without the ui section: the welcome message still opens, and "Don\'t show again" is stored', !thr2 && ST.get('ui.welcome') === false && !w.SparkWelcome.isOpen(), thr2 ? String(thr2) : '');
+    st.live = keep.live; st.ui = keep.ui; w.SPARK.live.setMode('analysis'); }
+  { const idx = fs.readFileSync(path.join(base, 'index.html'), 'utf8'), appv = /version: '([\d.]+)'/.exec(fs.readFileSync(path.join(base, 'app.js'), 'utf8'))[1], vs = Array.from(idx.matchAll(/(?:src|href)="(?!https?:)([^"?]+)\?v=([\d.]+)"/g));
+    const plain = Array.from(idx.matchAll(/<script src="(?!https?:)([^"?]+)"><\/script>/g)).length;
+    check('every local script and the stylesheet is requested with the app version, so a cached copy of one file cannot be mixed with new ones', vs.length >= 12 && vs.every(m => m[2] === appv) && plain === 0 && ['engine.js', 'settings.js', 'live.js', 'live_ui.js', 'welcome.js', 'styles.css'].every(f => vs.some(m => m[1] === f)), vs.length + ' references, version ' + appv); }
   check('no console errors overall', errors.length === 0, errors.slice(0, 3).join(' | '));
   // responsiveness hooks exist
   const css = fs.readFileSync(path.join(base, 'styles.css'), 'utf8'); check('responsive CSS: drawer, grid and print rules present', /max-width:860px/.test(css) && /@media print/.test(css) && /prefers-reduced-motion/.test(css));

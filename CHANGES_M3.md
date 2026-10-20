@@ -48,5 +48,11 @@
 - Very small screens: `body{min-width:320px}` removed (the page now adapts down to 240 px wide); extra rules below 360, 300 and 260 px (smaller paddings and controls, icon-only buttons, one-column tiles) and for screens up to 420 px high (the top bar scrolls away, dialogs use the whole height); chart tools wrap.
 - viewport_audit.js: 21 viewports (down to 240x240, 320x200 and 900x200) and a detector of controls that are too close (ignores controls under dialogs and inside closed sections).
 
+## v3.11.1: fix for "Cannot read properties of undefined (reading 'fitWindowMin')" on deployment
+- Cause (most likely, from the stack trace): `live_ui.js` runs `syncControls()` when it is loaded and read `ST.get('live')`, which is `undefined` if the served `settings.js` is an older file without the Live section (a cached copy mixed with the new `live_ui.js`).
+- Fix: `live_ui.js` has built-in defaults for the Live settings and never assumes the section exists (`liveSettings()`, `setLive()`), logs a warning and shows a toast asking for a reload ignoring the cache; `welcome.js` treats a missing `ui` section as "show the welcome". Cleaning settings used by Live also have fallbacks.
+- Prevention: every local script and the stylesheet are requested with `?v=<version>` so cached files of different versions cannot be mixed; a test checks that they match the version in app.js.
+- Tests: reproduces the exact error when the fix is reverted (an older settings file without the Live and ui sections); version-stamp consistency check.
+
 ## Tests (all pass)
-UI 150 checks, live stream 48, RR cleaning 8, engine vs R 56, parsing 31, phase detection 29; viewport audit 0 issues in 21 viewports (240x240 to 2560x1440). Desktop Chromium only; Safari, Firefox and physical phones not tested; the Chromium-based editor, lifecycle, performance and layout scripts were not run.
+UI 154 checks, live stream 48, RR cleaning 8, engine vs R 56, parsing 31, phase detection 29; viewport audit 0 issues in 21 viewports (240x240 to 2560x1440). Desktop Chromium only; Safari, Firefox and physical phones not tested; the Chromium-based editor, lifecycle, performance and layout scripts were not run.

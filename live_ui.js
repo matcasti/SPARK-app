@@ -7,13 +7,19 @@
 const doc = root.document, $ = id => doc.getElementById(id), L = root.SparkLive, ST = root.SparkSettings, E = root.SparkEngine, SA = root.SparkApp, X = root.SparkExport;
 let session = null, source = null, sourceKind = null, charts = {}, drawTimer = null, lastDraw = 0, wakeLock = null, mode = 'analysis', info = { name: '', battery: null, state: 'idle', detail: '' }, started = null, calibTimer = null;
 const listeners = [];
+/* Built-in defaults of the Live settings: the interface keeps working (and says so) if settings.js is an older file without the Live section, for instance a cached copy. */
+const LIVE_DEFAULTS = { smooth: true, displayDelayS: 1, calibrationS: 8, fitWindowMin: 10, refitEveryS: 15, minBeats: 120, chartWindowMin: 5, rrMinMs: 250, rrMaxMs: 2500, gapS: 4, clean: false, autoReconnect: true, keepAwake: true };
+const liveSettings = () => Object.assign({}, LIVE_DEFAULTS, ST.get('live') || {}), LS = k => liveSettings()[k];
+function setLive(k, v) { const all = ST.all(); if (all && !all.live) all.live = Object.assign({}, LIVE_DEFAULTS); ST.set('live.' + k, v); }
+const stale = !(ST.DEFAULTS && ST.DEFAULTS.live);
+if (stale) console.warn('SPARK: settings.js has no Live section (an older file, probably cached). Using the built-in defaults for Live; reload the page ignoring the cache (Ctrl+Shift+R).');
 const fmt = (x, d) => isFinite(x) ? Number(x).toFixed(d) : '—';
 const mmss = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 const toast = (m, k, ms) => root.SparkApp && root.SparkApp.toast && root.SparkApp.toast(m, k, ms);
 
 /* ---- options and session ------------------------------------------------------------------------------------------------------------------------- */
 function liveOptions() {
-  const v = ST.get('live'), A = ST.get('analysis'); let cfg; try { cfg = ST.modelSettings(); } catch (e) { cfg = { priors: E.sparkPriors(), control: E.sparkControl() }; }
+  const v = liveSettings(), A = Object.assign({ cleanWindow: 50, cleanNMad: 3.5, cleanNIter: 2 }, ST.get('analysis') || {}); let cfg; try { cfg = ST.modelSettings(); } catch (e) { cfg = { priors: E.sparkPriors(), control: E.sparkControl() }; }
   return { fitWindowS: v.fitWindowMin * 60, refitEveryS: v.refitEveryS, minBeats: v.minBeats, chartWindowS: v.chartWindowMin * 60, rrMinMs: v.rrMinMs, rrMaxMs: v.rrMaxMs, gapS: v.gapS,
            clean: v.clean ? { window: A.cleanWindow, n_mad: A.cleanNMad, n_iter: A.cleanNIter } : null, priors: cfg.priors, control: cfg.control };
 }
@@ -30,7 +36,7 @@ function onStatus(state, i) {
   if (state === 'failed') detail = i && i.reason === 'cancelled' ? 'No device was selected.' : i && i.reason === 'reconnect' ? 'Could not reconnect: switch the sensor on, wet the electrodes and connect again.' : i && i.reason === 'unsupported' ? 'This browser has no Web Bluetooth.' : (i && i.message) || 'Connection failed.';
   if (state === 'lost' && i && i.attempt) detail = 'attempt ' + i.attempt;
   info.detail = detail;
-  if (state === 'streaming') { ensureSession().startCalibration(ST.get('live.calibrationS'), sourceKind === 'polar' ? L.now() : null); startCalibTicker(); }   // each (re)connection: the first seconds are discarded
+  if (state === 'streaming') { ensureSession().startCalibration(LS('calibrationS'), sourceKind === 'polar' ? L.now() : null); startCalibTicker(); }   // each (re)connection: the first seconds are discarded
   else if (state !== 'lost') stopCalibTicker();
   setStatusText();
   $('live-chip').classList.toggle('ok', state === 'streaming'); $('live-stop').disabled = !(state === 'streaming' || state === 'lost' || state === 'connecting' || state === 'scanning');
@@ -59,7 +65,7 @@ async function startSource(src, kind) {
 }
 async function connectPolar() {
   if (!L.PolarSource.supported()) { onStatus('failed', { reason: 'unsupported' }); return false; }
-  const s = ensureSession(), src = new L.PolarSource({ autoReconnect: ST.get('live.autoReconnect'), onPacket, onStatus, onBattery: b => { info.battery = b; renderMeta(); }, onReconnect: () => { s.markReconnect(); toast('Reconnected: a new segment started.', '', 3200); } });
+  const s = ensureSession(), src = new L.PolarSource({ autoReconnect: LS('autoReconnect'), onPacket, onStatus, onBattery: b => { info.battery = b; renderMeta(); }, onReconnect: () => { s.markReconnect(); toast('Reconnected: a new segment started.', '', 3200); } });
   await startSource(src, 'polar'); return source && source.state === 'streaming';
 }
 async function simulate(rr, opts) {
@@ -71,7 +77,7 @@ async function stop() {
   const src = source; source = null; if (src) { try { await src.disconnect(); } catch (e) { /* ignore */ } } releaseScreen(); sourceKind = null; renderBanner(); syncButtons();
 }
 async function lockScreen() {
-  try { if (ST.get('live.keepAwake') && root.navigator && root.navigator.wakeLock && !wakeLock) { wakeLock = await root.navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } } catch (e) { wakeLock = null; }
+  try { if (LS('keepAwake') && root.navigator && root.navigator.wakeLock && !wakeLock) { wakeLock = await root.navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } } catch (e) { wakeLock = null; }
 }
 function releaseScreen() { try { if (wakeLock) { wakeLock.release(); } } catch (e) { /* ignore */ } wakeLock = null; }
 doc.addEventListener('visibilitychange', () => { if (doc.visibilityState === 'visible' && info.state === 'streaming') lockScreen(); });
@@ -147,8 +153,8 @@ function ensureCharts() {
 }
 /* ---- continuous display: the plots are drawn at a display time that advances smoothly, with the curve interpolated between beats ------------------------------ */
 const SM = L.smooth, disp = { t: null, seg: null, last: 0, yr: {}, raf: 0, running: false }; let view = null;
-const smoothOn = () => !!ST.get('live.smooth') && !(ST.get('appearance.reduceMotion') || (root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches));
-const delayS = () => Math.max(0.3, +ST.get('live.displayDelayS') || 1);
+const smoothOn = () => !!LS('smooth') && !(ST.get('appearance.reduceMotion') || (root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches));
+const delayS = () => Math.max(0.3, +LS('displayDelayS') || 1);
 function scheduleDraw() {
   if (drawTimer) return; const wait = Math.max(0, (smoothOn() ? 250 : 450) - (Date.now() - lastDraw));
   drawTimer = setTimeout(() => { drawTimer = null; lastDraw = Date.now(); draw(); }, wait);
@@ -204,12 +210,12 @@ function destroyCharts() { Object.keys(charts).forEach(k => { try { charts[k] &&
 
 /* ---- controls ------------------------------------------------------------------------------------------------------------------------------------------ */
 function syncControls() {
-  const v = ST.get('live'); $('live-win').value = v.fitWindowMin; $('live-refit').value = v.refitEveryS; $('live-chartwin').value = v.chartWindowMin; $('live-clean').checked = !!v.clean;
+  const v = liveSettings(); $('live-win').value = v.fitWindowMin; $('live-refit').value = v.refitEveryS; $('live-chartwin').value = v.chartWindowMin; $('live-clean').checked = !!v.clean;
   const sup = L.PolarSource.supported(); $('live-support').textContent = sup ? 'Web Bluetooth is available. The Polar H10 needs to be worn (moisten the electrodes) and not connected to another app.' : 'This browser has no Web Bluetooth: use Chrome or Edge (desktop or Android) on https:// or localhost.';
   $('live-connect').title = sup ? 'Choose a Polar H10 (or any Bluetooth heart-rate sensor) in the browser dialog' : 'Web Bluetooth is not available in this browser';
 }
-[['live-win', 'live.fitWindowMin'], ['live-refit', 'live.refitEveryS'], ['live-chartwin', 'live.chartWindowMin']].forEach(([id, path]) => { $(id).onchange = function () { const x = parseFloat(this.value); if (!isFinite(x)) { syncControls(); return; } ST.set(path, Math.max(+this.min || 0, x)); }; });
-$('live-clean').onchange = function () { ST.set('live.clean', this.checked); };
+[['live-win', 'live.fitWindowMin'], ['live-refit', 'live.refitEveryS'], ['live-chartwin', 'live.chartWindowMin']].forEach(([id, path]) => { $(id).onchange = function () { const x = parseFloat(this.value); if (!isFinite(x)) { syncControls(); return; } setLive(path.slice(5), Math.max(+this.min || 0, x)); }; });
+$('live-clean').onchange = function () { setLive('clean', this.checked); };
 $('live-connect').onclick = () => connectPolar();
 $('live-stop').onclick = () => stop();
 $('live-clear').onclick = () => { if (session) { session.reset(); } destroyCharts(); setHR(null); started = null; draw(); renderBanner(); syncButtons(); };
@@ -255,6 +261,7 @@ if (root.MutationObserver) new root.MutationObserver(rebuildIfThemeChanged).obse
 ST.onChange(p => { if (typeof p === 'string' && /^(appearance|charts)/.test(p)) rebuildIfThemeChanged(); });
 ST.onChange(p => { if (typeof p === 'string' && (p.startsWith('live') || p === '*' || p === 'analysis' || /^analysis\.clean/.test(p) || p.startsWith('model'))) applyOptions(); });
 syncControls(); renderBanner(); renderMetrics(); doc.querySelectorAll('.live-card').forEach(c => { c.hidden = true; });
+if (stale && root.SparkApp && root.SparkApp.ready) root.SparkApp.ready.then(() => toast('Some files are from an older version (cached?). Reload the page ignoring the cache: Ctrl+Shift+R.', 'err', 9000));
 
 /* ---- public API ------------------------------------------------------------------------------------------------------------------------------------------- */
 root.SPARK = root.SPARK || {};

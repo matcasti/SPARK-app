@@ -5,15 +5,17 @@
 (function (root) {
 'use strict';
 const doc = root.document, $ = id => doc.getElementById(id), ST = root.SparkSettings; let lastFocus = null;
+const wanted = () => ST.get('ui.welcome') !== false;      // a settings file without the `ui` section (older or cached) counts as "show it"
+function setWanted(v) { try { const all = ST.all(); if (all && !all.ui) all.ui = { welcome: true }; ST.set('ui.welcome', v, true); } catch (e) { /* the choice just is not stored */ } }
 const modal = () => $('welcome-modal'), isOpen = () => modal().classList.contains('show');
 function focusables() { return Array.from(modal().querySelectorAll('button, [href], input, select, summary, [tabindex]:not([tabindex="-1"])')).filter(el => !el.disabled && el.offsetParent !== null || el === doc.activeElement); }
 function open() {
-  if (isOpen()) return; lastFocus = doc.activeElement; $('wm-never').checked = !ST.get('ui.welcome');
+  if (isOpen()) return; lastFocus = doc.activeElement; $('wm-never').checked = !wanted();
   modal().classList.add('show'); modal().setAttribute('aria-hidden', 'false'); doc.body.classList.add('wm-open'); $('wm-curious').open = false; const b = modal().querySelector('.wm-body'); if (b) b.scrollTop = 0;
   setTimeout(() => $('wm-start').focus(), 0);
 }
 function close() {
-  if (!isOpen()) return; ST.set('ui.welcome', !$('wm-never').checked, true);
+  if (!isOpen()) return; setWanted(!$('wm-never').checked);
   modal().classList.remove('show'); modal().setAttribute('aria-hidden', 'true'); doc.body.classList.remove('wm-open');
   try { if (lastFocus && lastFocus.focus && doc.contains(lastFocus)) lastFocus.focus(); } catch (e) { /* ignore */ } lastFocus = null;
 }
@@ -33,5 +35,5 @@ doc.addEventListener('keydown', ev => {
   if (ev.key === '?') { ev.preventDefault(); open(); }
 });
 root.SparkWelcome = { open, close, isOpen };
-if (root.SparkApp && root.SparkApp.ready) root.SparkApp.ready.then(() => { if (ST.get('ui.welcome')) open(); });
+if (root.SparkApp && root.SparkApp.ready) root.SparkApp.ready.then(() => { if (wanted()) open(); });
 })(typeof window !== 'undefined' ? window : globalThis);
