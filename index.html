@@ -22,7 +22,7 @@
 <div id="toasts" aria-live="polite"></div>
 <div class="scrim" id="scrim"></div>
 
-<div id="app">
+<div id="app" data-mode="analysis">
 
 <!-- TOPBAR -->
 <header class="topbar">
@@ -36,7 +36,12 @@
       <div class="spark-sub">Dual OU drives &middot; Morlet CWT anchor &middot; MAP (M3) &middot; Client-side</div>
     </div>
   </div>
+  <div class="tb-break" aria-hidden="true"></div>
   <div class="tb-right">
+    <div class="mode-switch" role="tablist" aria-label="Section">
+      <button class="mode-btn active" id="mode-analysis" role="tab" aria-selected="true" title="Analyse a recording">Analysis</button>
+      <button class="mode-btn" id="mode-live" role="tab" aria-selected="false" title="Receive RR intervals from a Polar H10 and reconstruct them on the go"><span class="live-dot" id="live-dot"></span>Live</button>
+    </div>
     <span class="model-badge" title="Model specification, identical to the R engine">M3</span>
     <button class="btn-top primary" id="btn-run-top" disabled title="Run analysis (R)">
       <svg width="11" height="11" fill="currentColor" viewBox="0 0 16 16"><path d="M3 2.5l10 5.5-10 5.5V2.5z"/></svg><span class="lbl">Run</span>
@@ -47,6 +52,9 @@
       </button>
       <div class="menu" id="export-menu"></div>
     </div>
+    <button class="icon-btn" id="btn-help" title="Welcome and about (?)" aria-label="Open the welcome message" aria-haspopup="dialog">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.2-2.5 3.9M12 17.2h.01"/></svg>
+    </button>
     <button class="icon-btn" id="btn-settings" title="Settings (S)" aria-label="Open settings">
       <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
     </button>
@@ -77,6 +85,15 @@
           <option value="auto">Auto-detect</option><option value="ms">Milliseconds (ms)</option><option value="s">Seconds (s)</option><option value="min">Minutes (min)</option>
         </select>
         <div class="ctrl-hint">One RR value per line, or a table with an RR (or beat time) column. Semicolons, tabs and decimal commas are fine.</div>
+      </div>
+      <div class="ctrl-grp" style="margin-top:2px">
+        <label class="chk-inline"><input type="checkbox" id="clean-on" aria-describedby="clean-summary"><span>Clean RR intervals first</span></label>
+        <div class="clean-grid hidden" id="clean-controls">
+          <label><span>Window</span><input type="number" id="clean-window" min="3" step="2" aria-label="Cleaning window (beats)"></label>
+          <label><span>MAD ×</span><input type="number" id="clean-nmad" min="0.5" step="0.5" aria-label="Cleaning MAD multiplier"></label>
+          <label><span>Passes</span><input type="number" id="clean-niter" min="1" max="20" step="1" aria-label="Cleaning passes"></label>
+        </div>
+        <div class="ctrl-hint" id="clean-summary">Off: the data are used as loaded.</div>
       </div>
       <div class="data-chip" id="data-chip"><span class="chip-dot"></span><span id="data-chip-text">No data loaded</span></div>
       <div class="ex-row" role="group" aria-label="Built-in examples">
@@ -163,6 +180,41 @@
 
     <div class="panel"><div class="ctrl-hint">Shortcuts: <span class="kbd">R</span> run · <span class="kbd">S</span> settings · <span class="kbd">E</span> export · <span class="kbd">T</span> theme · <span class="kbd">1</span>–<span class="kbd">6</span> tabs</div></div>
 
+    <!-- ── LIVE (Polar H10) ── -->
+    <div class="panel live-panel" id="lp-sensor">
+      <span class="plabel-static">Sensor</span>
+      <div class="live-hrbox" aria-live="off"><span class="live-hr dim" id="live-hr">—</span><span class="live-hr-unit">bpm</span></div>
+      <div class="data-chip" id="live-chip"><span class="chip-dot"></span><span id="live-status">Not connected</span></div>
+      <div class="live-meta" id="live-meta"></div>
+      <button class="btn btn-primary" id="live-connect" title="Choose a Polar H10 (or any Bluetooth heart-rate sensor) in the browser dialog">
+        <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11L12 23V1l5.5 5.5-11 11"/></svg>Connect Polar H10</button>
+      <button class="btn btn-ghost" id="live-stop" disabled>Stop</button>
+      <div class="ctrl-hint" id="live-support"></div>
+    </div>
+    <div class="panel live-panel" id="lp-recon">
+      <span class="plabel-static">Reconstruction</span>
+      <div class="clean-grid">
+        <label><span>Window (min)</span><input type="number" id="live-win" min="0" step="1" aria-label="Window for the fit and the filter (minutes)"></label>
+        <label><span>Refit (s)</span><input type="number" id="live-refit" min="5" step="5" aria-label="Re-estimate the parameters every (seconds)"></label>
+        <label><span>Chart (min)</span><input type="number" id="live-chartwin" min="1" step="1" aria-label="Time shown in the charts (minutes)"></label>
+      </div>
+      <label class="chk-inline" style="margin-top:9px"><input type="checkbox" id="live-clean"><span>Also apply the RR cleaning gate</span></label>
+      <div class="ctrl-hint">The states are updated at every beat; the parameters are re-estimated in the background. More options in Settings → Live.</div>
+    </div>
+    <div class="panel live-panel" id="lp-session">
+      <span class="plabel-static">Session</span>
+      <div class="live-counts" id="live-counts">No beats yet.</div>
+      <button class="btn btn-primary" id="live-send" disabled title="Load the longest uninterrupted segment into the Analysis section">Send to analysis</button>
+      <div class="ex-row">
+        <button class="btn btn-ghost" id="live-dl-rr" disabled>RR (CSV)</button>
+        <button class="btn btn-ghost" id="live-dl-recon" disabled>States (CSV)</button>
+      </div>
+      <div class="ex-row">
+        <button class="btn btn-ghost" id="live-dl-json" disabled>Session (JSON)</button>
+        <button class="btn btn-ghost" id="live-clear" disabled>Clear</button>
+      </div>
+    </div>
+
   </aside>
 
   <!-- ── CONTENT ── -->
@@ -206,8 +258,45 @@
       <div id="tab-diag" class="tab-panel" role="tabpanel"><div class="dchips" id="dchips"></div><div class="cc-grid" id="grid-diag"></div></div>
     </div>
 
+    <div id="live-view" aria-label="Live reconstruction">
+      <div class="live-banner" id="live-banner"><span class="pill" id="live-state-pill">Not connected</span><span id="live-state-text">Connect a Polar H10 to receive RR intervals and reconstruct the autonomic drives as they arrive.</span></div>
+      <div class="metric-wrap"><div class="metric-grid" id="live-metrics"></div></div>
+      <div class="live-plots">
+      <div class="live-card" data-live="rr"><div class="cc-head"><div class="cc-lbl"><div class="cc-text"><span class="cc-title">RR interval</span><span class="cc-sub">Received beats, the series the model uses, and its filtered estimate with the 95% band</span></div></div></div><div class="cc-body" data-h="270"><canvas id="live-chart-rr"></canvas></div></div>
+      <div class="live-card" data-live="states"><div class="cc-head"><div class="cc-lbl"><div class="cc-text"><span class="cc-title">Latent autonomic drives</span><span class="cc-sub">Vagal-like (x_p) and sympathetic-like (x_s) drive, updated at every beat, with 95% bands</span></div></div></div><div class="cc-body" data-h="270"><canvas id="live-chart-states"></canvas></div></div>
+      </div>
+      <div class="se-note" id="live-note"></div>
+    </div>
+
   </main>
 </div>
+</div>
+
+
+<div class="modal welcome-modal" id="welcome-modal" role="dialog" aria-modal="true" aria-labelledby="wm-title" aria-hidden="true">
+  <div class="modal-card wm-card">
+    <div class="modal-head"><span class="spark-tag">SPARK</span><h2 id="wm-title">Welcome</h2>
+      <button class="icon-btn" id="wm-x" aria-label="Close the welcome message"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="wm-body">
+      <p class="wm-lead">Reconstruct the <b>vagal-like</b> and <b>sympathetic-like</b> drives of the heart from RR intervals alone. Everything runs in your browser: your data are never uploaded.</p>
+      <div class="wm-grid">
+        <section class="wm-card-i"><h3>Analyse a recording</h3><p>Drop a .txt or .csv of RR intervals (ms, s or min, auto-detected) or load an example. Optionally clean artifacts first with the running-median / MAD gate used in the data preparation of the R pipeline. Get ν₀, the two time constants, the noise, standard errors and 95% bands.</p></section>
+        <section class="wm-card-i"><h3>See the drives</h3><p>Vagal-like (x_p) and sympathetic-like (x_s) trajectories, the phase map and the state-space landscape. Rest, stress and recovery are detected from heart rate, or you draw them.</p></section>
+        <section class="wm-card-i"><h3>Go live with a Polar H10</h3><p>Switch to <b>Live</b>, connect the strap over Bluetooth (Chrome or Edge) and watch the drives update at every beat. Send the session to the analysis when you finish.</p></section>
+        <section class="wm-card-i"><h3>Check, export, reproduce</h3><p>Diagnostics and HRV statistics (observed vs filtered), a parameter playground, PNG, CSV, JSON and HTML exports, and an R script that reproduces the fit.</p></section>
+      </div>
+      <p class="wm-tip">Shortcuts: <span class="kbd">R</span> run · <span class="kbd">S</span> settings · <span class="kbd">E</span> export · <span class="kbd">T</span> theme · <span class="kbd">?</span> this message</p>
+      <div class="wm-quick"><button class="btn btn-ghost" id="wm-example">Try the 5-2-5 example</button><button class="btn btn-ghost" id="wm-live">Open the Live section</button></div>
+      <details class="wm-curious" id="wm-curious"><summary>For the curious: the model and the engine</summary>
+        <div class="wm-more">
+          <p><b>The model (M3).</b> Two latent Ornstein–Uhlenbeck drives, x_p (fast, a time constant of seconds, vagal-like) and x_s (slow, minutes, sympathetic-like), set the instantaneous rate ν(t) = ν₀ − x_p + x_s of an integrate-and-fire pacemaker: a beat occurs when the integrated phase reaches 1 and the phase then resets. Noise at the threshold gives the RR jitter.</p>
+          <p><b>Estimation.</b> An exact Kalman filter on the phase-domain model, with ν₀ and the global scale profiled out (concentrated GLS likelihood). Three parameters (κ_S, κ_P, Λ_R) are fitted by maximum a posteriori, with weak log-normal priors on τ_P, τ_S and the jitter and a prior on the separation of the two time scales. Standard errors come from the numerical Hessian (delta method).</p>
+          <p><b>The spectral anchor.</b> The vagal-to-sympathetic variance ratio V_P/V_S cannot be identified from RR alone. It is fixed from a Morlet wavelet spectrum of heart rate, split logistically at 0.1 Hz with a vagal floor (default 0.25). It decides how a sustained change is shared between the two drives, so read that split as conditional on the anchor.</p>
+          <p><b>The engine.</b> A JavaScript port of the R engine (<code>model_engine.R</code>) that agrees with it to about 1e-9 in states and likelihood. Heavy work runs in a Web Worker, and ectopic or noisy beats are down-weighted by an artifact multiplier. The states are model-based latent drives, not recordings of nerve activity; in Live they are causal filtered estimates, so they lag sudden changes.</p>
+        </div></details>
+    </div>
+    <div class="modal-foot"><label class="chk-inline"><input type="checkbox" id="wm-never"><span>Don’t show this again</span></label><span class="grow"></span><button class="btn btn-primary" id="wm-start">Get started</button></div>
+  </div>
 </div>
 
 <div class="modal" id="settings-modal" aria-hidden="true"></div>
@@ -218,11 +307,14 @@
 
 <script src="engine.js"></script>
 <script src="compute.js"></script>
+<script src="live.js"></script>
 <script src="settings.js"></script>
 <script src="charts.js"></script>
 <script src="export.js"></script>
 <script src="editor.js"></script>
 <script src="tips.js"></script>
 <script src="app.js"></script>
+<script src="live_ui.js"></script>
+<script src="welcome.js"></script>
 </body>
 </html>

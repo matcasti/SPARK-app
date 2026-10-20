@@ -7,10 +7,12 @@
 const E = root.SparkEngine, KEY = 'spark.settings.v3';
 
 const DEFAULTS = {
+  live: { smooth: true, displayDelayS: 1, calibrationS: 8, fitWindowMin: 10, refitEveryS: 15, minBeats: 120, chartWindowMin: 5, rrMinMs: 250, rrMaxMs: 2500, gapS: 4, clean: false, autoReconnect: true, keepAwake: true },
+  ui: { welcome: true },
   appearance: { theme: 'auto', accent: 'blue', density: 'comfortable', fontScale: 1, reduceMotion: false },
   charts: { colorP: '', colorS: '', lineWidth: 1.6, showCI: true, showGrid: true, maxPoints: 3000, palette: 'inferno', hidden: {} },
   model: { priors: JSON.parse(JSON.stringify(E.DEFAULT_PRIORS)), control: JSON.parse(JSON.stringify(E.DEFAULT_CONTROL)) },
-  analysis: { timeUnit: 'auto', autoRun: false, computeSE: true, phaseMode: 'auto', phaseMarkers: '', phaseSensitivity: 'standard', phaseMinShift: 10, phaseMinZ: 4, phaseMinSegment: 30, phaseMaxStressors: 4, rollWindow: 60, rollStep: 10, landscapeGrid: 80, landscapeBandwidth: 1, showFlow: true, showBasins: true, minBasin: 0.3 },
+  analysis: { timeUnit: 'auto', autoRun: false, cleanRR: false, cleanWindow: 50, cleanNMad: 3.5, cleanNIter: 2, computeSE: true, phaseMode: 'auto', phaseMarkers: '', phaseSensitivity: 'standard', phaseMinShift: 10, phaseMinZ: 4, phaseMinSegment: 30, phaseMaxStressors: 4, rollWindow: 60, rollStep: 10, landscapeGrid: 80, landscapeBandwidth: 1, showFlow: true, showBasins: true, minBasin: 0.3 },
   export: { scale: 2, background: 'theme', prefix: 'spark', decimal: '.', separator: ',', includeSettings: true }
 };
 const ACCENTS = { blue: ['#5B9CFF', '#2563EB'], teal: ['#2DD4D4', '#0E9AA7'], violet: ['#A78BFA', '#6D4FD1'], amber: ['#F5B84B', '#C98A12'], green: ['#3DDC97', '#169C62'] };
@@ -18,7 +20,7 @@ const PALETTES = ['inferno', 'viridis', 'magma', 'mako'];
 
 const clone = o => JSON.parse(JSON.stringify(o));
 function merge(base, extra) { // deep merge that keeps only keys that exist in the defaults (old or foreign files cannot add junk)
-  const out = Array.isArray(base) ? base.slice() : Object.assign({}, base);
+  const out = clone(base);                                    // a deep copy: sections missing from a saved file must not share objects with DEFAULTS (a later set() would change the defaults)
   Object.keys(base).forEach(k => {
     if (extra && k in extra) {
       if (base[k] && typeof base[k] === 'object' && !Array.isArray(base[k]) && k !== 'hidden') out[k] = merge(base[k], extra[k]);
@@ -119,11 +121,17 @@ const SCHEMA = [
     { path: 'appearance.accent', label: 'Accent colour', type: 'accent' },
     { path: 'appearance.density', label: 'Density', type: 'select', options: [['comfortable', 'Comfortable'], ['compact', 'Compact']] },
     { path: 'appearance.fontScale', label: 'Text size', type: 'number', min: 0.8, max: 1.3, step: 0.05, hint: '1 = default' },
-    { path: 'appearance.reduceMotion', label: 'Reduce motion', type: 'checkbox', hint: 'Disables transitions and animations' }] }] },
+    { path: 'appearance.reduceMotion', label: 'Reduce motion', type: 'checkbox', hint: 'Disables transitions and animations' }] },
+    { title: 'Start', rows: [{ path: 'ui.welcome', label: 'Show the welcome message when the app starts', type: 'checkbox', hint: 'It can always be reopened with the ? button in the top bar or the ? key.' }] }] },
 
   { id: 'data', title: 'Data', groups: [
     { title: 'File input', rows: [
       { path: 'analysis.timeUnit', label: 'Time unit of the file', type: 'select', options: [['auto', 'Auto-detect'], ['ms', 'Milliseconds (ms)'], ['s', 'Seconds (s)'], ['min', 'Minutes (min)']], hint: 'RR intervals or beat times in .txt / .csv files. Auto-detect uses a header hint such as “RR (ms)” or the typical value; choose a unit if it cannot tell.' }] },
+    { title: 'RR cleaning (optional)', rows: [
+      { path: 'analysis.cleanRR', label: 'Clean RR intervals before the analysis', type: 'checkbox', hint: 'The running-median / MAD gate of tools/prep-data.R: a value farther than n × MAD from the running median is replaced by linear interpolation, the gate is applied several times and the number of beats does not change. Off by default; the model also down-weights artifact beats.' },
+      { path: 'analysis.cleanWindow', label: 'Window (beats)', type: 'number', min: 3, step: 2, hint: 'Default 50. An even value is raised to the next odd one; it never exceeds the length of the series.' },
+      { path: 'analysis.cleanNMad', label: 'MAD multiplier (n × MAD)', type: 'number', min: 0.5, step: 0.5, hint: 'Default 3.5. Smaller values replace more beats (2 changes about 4-7% of artifact-free beats).' },
+      { path: 'analysis.cleanNIter', label: 'Passes', type: 'number', min: 1, max: 20, step: 1, hint: 'Default 2.' }] },
     { title: 'Running', rows: [
       { path: 'analysis.autoRun', label: 'Run automatically after loading', type: 'checkbox' }] }] },
 
@@ -178,6 +186,23 @@ const SCHEMA = [
       { path: 'analysis.showFlow', label: 'Show mean-flow arrows', type: 'checkbox' },
       { path: 'analysis.showBasins', label: 'Mark basins', type: 'checkbox' }] }] },
 
+  { id: 'live', title: 'Live', groups: [
+    { title: 'Reconstruction on the go', rows: [
+      { path: 'live.fitWindowMin', label: 'Window for the fit and the filter (min)', type: 'number', min: 0, step: 1, hint: 'The latest minutes of the current segment are used. 0 = everything since the start. Longer windows give steadier parameters; the model needs a few minutes to settle (about 5).' },
+      { path: 'live.refitEveryS', label: 'Re-estimate the parameters every (s of recording)', type: 'number', min: 5, step: 5, hint: 'The states are updated at every beat with the latest parameters; the fit itself takes about 0.1 s and runs in the background.' },
+      { path: 'live.minBeats', label: 'Beats before the first fit', type: 'number', min: 40, step: 10, hint: 'Until then only the RR intervals are shown.' },
+      { path: 'live.chartWindowMin', label: 'Time shown in the charts (min)', type: 'number', min: 1, step: 1 },
+      { path: 'live.smooth', label: 'Smooth, continuous plot updating', type: 'checkbox', hint: 'The plots scroll continuously in real time and the curve is interpolated between beats, with a fixed display delay (below), instead of jumping at every beat. Off, or with Appearance → Reduce motion on, they update at each beat.' },
+      { path: 'live.displayDelayS', label: 'Display delay for smooth updating (s)', type: 'number', min: 0.3, max: 5, step: 0.1, hint: 'How far behind the newest beat the plots are drawn; about one beat interval (1 s) gives a steady motion. Shorter follows more closely but can stall when beats arrive late.' }] },
+    { title: 'Incoming beats', rows: [
+      { path: 'live.rrMinMs', label: 'Shortest accepted RR (ms)', type: 'number', min: 150, step: 10, hint: 'Values outside the accepted range are dropped and counted. Jumps and ectopic beats inside the range are handled by the model (artifact multiplier).' },
+      { path: 'live.rrMaxMs', label: 'Longest accepted RR (ms)', type: 'number', min: 1000, step: 100 },
+      { path: 'live.gapS', label: 'Gap detection (s)', type: 'number', min: 2, step: 1, hint: 'If the clock runs this far ahead of the beats received (beats lost on the radio link) a new segment starts; the reconstruction uses the current segment.' },
+      { path: 'live.clean', label: 'Also apply the RR cleaning gate to the window', type: 'checkbox', hint: 'The gate of tools/prep-data.R with the values of Settings → Data → RR cleaning. Near the newest beat the running window is one-sided, so the latest values are the least reliable.' }] },
+    { title: 'Sensor', rows: [
+      { path: 'live.calibrationS', label: 'Calibration period after connecting (s)', type: 'number', min: 0, max: 120, step: 1, hint: 'RR intervals received during this period are discarded (the electrodes settle and the first beats are unreliable); the recording starts after it, as in the original app. 0 turns it off. It also applies after an automatic reconnection.' },
+      { path: 'live.autoReconnect', label: 'Reconnect automatically when the link is lost', type: 'checkbox', hint: 'Up to five attempts; a reconnection starts a new segment.' },
+      { path: 'live.keepAwake', label: 'Keep the screen awake while streaming', type: 'checkbox', hint: 'Uses the Screen Wake Lock API where the browser has it.' }] }] },
   { id: 'charts', title: 'Charts', groups: [
     { title: 'Series', rows: [
       { path: 'charts.colorP', label: 'Vagal-like (x_p) colour', type: 'color', hint: 'Empty = theme default' },
@@ -221,12 +246,12 @@ function buildRow(r, ctx) {
   if (r.type === 'note') return el('div', { class: 'set-note', text: r.text });
   if (r.type === 'chartlist') return ctx.chartList();
   if (r.type === 'presets') {
-    const box = el('div', { class: 'pair', style: 'flex-wrap:wrap' });
+    const box = el('div', { class: 'pair', style: 'display:flex;flex-wrap:wrap;gap:8px' });
     Object.keys(PRESETS).forEach(k => box.appendChild(el('button', { class: 'btn btn-ghost', style: 'width:auto', text: k, onclick: () => { PRESETS[k](); emit('model'); ctx.render(); ctx.toast('Preset applied: ' + k, 'ok'); } })));
     return box;
   }
   if (r.type === 'settingsio') {
-    const box = el('div', { class: 'pair', style: 'flex-wrap:wrap' });
+    const box = el('div', { class: 'pair', style: 'display:flex;flex-wrap:wrap;gap:8px' });
     box.appendChild(el('button', { class: 'btn btn-ghost', style: 'width:auto', text: 'Export settings (JSON)', onclick: () => ctx.download(S.exportJSON(), 'spark_settings.json', 'application/json') }));
     const f = el('input', { type: 'file', accept: '.json', style: 'display:none', onchange: ev => { const file = ev.target.files[0]; if (!file) return; file.text().then(t => { try { S.importJSON(t); ctx.render(); ctx.toast('Settings imported', 'ok'); } catch (e) { ctx.toast(e.message, 'err'); } }); ev.target.value = ''; } });
     box.appendChild(el('button', { class: 'btn btn-ghost', style: 'width:auto', text: 'Import settings…', onclick: () => f.click() })); box.appendChild(f);

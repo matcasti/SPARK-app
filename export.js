@@ -107,8 +107,8 @@ function parametersCSV() {
   download(csv(['parameter', 'group', 'estimate', 'se', 'ci95_low', 'ci95_high', 'status', 'interpretation'], rows.concat(extra)), fname('parameters', 'csv'), 'text/csv'); toast('Saved parameters CSV', 'ok');
 }
 function beatsCSV() {
-  const f = ctx.fit, h = ['beat', 'time_s', 'rr_observed_s', 'rr_filtered_s', 'rr_filtered_lo95', 'rr_filtered_hi95', 'x_p_hz', 'x_p_se', 'x_s_hz', 'x_s_se', 'artifact_multiplier', 'innovation', 'innovation_diagnostic'], rows = [];
-  for (let i = 0; i < f.dy.length; i++) { const sr = Math.sqrt(Math.max(f.rrV[i], 0)); rows.push([i + 1, nfix(f.time[i], 4), nfix(f.dy[i], 5), nfix(f.irr[i], 5), nfix(f.irr[i] - 1.96 * sr, 5), nfix(f.irr[i] + 1.96 * sr, 5), nf(f.Xp[i], 7), nf(Math.sqrt(Math.max(f.XpV[i], 0)), 6), nf(f.Xs[i], 7), nf(Math.sqrt(Math.max(f.XsV[i], 0)), 6), nf(f.gate[i], 6), nf(f.innovations[i], 6), nf(f.innovations_diagnostic[i], 6)]); }
+  const f = ctx.fit, cln = f.cleaning && f.cleaning.enabled, h = ['beat', 'time_s', 'rr_observed_s'].concat(cln ? ['rr_raw_s', 'replaced'] : [], ['rr_filtered_s', 'rr_filtered_lo95', 'rr_filtered_hi95', 'x_p_hz', 'x_p_se', 'x_s_hz', 'x_s_se', 'artifact_multiplier', 'innovation', 'innovation_diagnostic']), rows = [];
+  for (let i = 0; i < f.dy.length; i++) { const sr = Math.sqrt(Math.max(f.rrV[i], 0)); rows.push([i + 1, nfix(f.time[i], 4), nfix(f.dy[i], 5)].concat(cln ? [nfix(f.cleaning.raw[i], 5), f.cleaning.changed[i]] : [], [nfix(f.irr[i], 5), nfix(f.irr[i] - 1.96 * sr, 5), nfix(f.irr[i] + 1.96 * sr, 5), nf(f.Xp[i], 7), nf(Math.sqrt(Math.max(f.XpV[i], 0)), 6), nf(f.Xs[i], 7), nf(Math.sqrt(Math.max(f.XsV[i], 0)), 6), nf(f.gate[i], 6), nf(f.innovations[i], 6), nf(f.innovations_diagnostic[i], 6)])); }
   download(csv(h, rows), fname('beats', 'csv'), 'text/csv'); toast('Saved per-beat CSV (' + rows.length + ' rows)', 'ok');
 }
 function phasesCSV() {
@@ -128,7 +128,8 @@ function filteredRR(unit, fmt) {
 }
 function sessionObject(withData) {
   const f = ctx.fit, rep = ctx.rep, diag = ctx.diag, dm = ctx.dm;
-  return { spark_session: 3, created: new Date().toISOString(), model: 'M3 (engine model_engine.R)', data: { label: ctx.label, beats: f.dy.length, duration_s: f.time[f.time.length - 1], read_as: ctx.read ? { unit: ctx.read.unit, unit_source: ctx.read.unitSource, kind: ctx.read.kind, column: ctx.read.column, delimiter: ctx.read.delimiter, decimal_comma: ctx.read.decimalComma } : 'built-in example', rr_s: withData ? Array.from(f.dy) : undefined },
+  return { spark_session: 3, created: new Date().toISOString(), model: 'M3 (engine model_engine.R)', data: { label: ctx.label, beats: f.dy.length, duration_s: f.time[f.time.length - 1], read_as: ctx.read ? { unit: ctx.read.unit, unit_source: ctx.read.unitSource, kind: ctx.read.kind, column: ctx.read.column, delimiter: ctx.read.delimiter, decimal_comma: ctx.read.decimalComma } : 'built-in example', rr_s: withData ? Array.from(f.dy) : undefined, rr_raw_s: withData && f.cleaning && f.cleaning.enabled ? Array.from(f.cleaning.raw) : undefined },
+    cleaning: f.cleaning && f.cleaning.enabled ? { enabled: true, gate: 'running median / MAD (tools/prep-data.R clean_sample)', window: f.cleaning.opts.window, n_mad: f.cleaning.opts.n_mad, n_iter: f.cleaning.opts.n_iter, n_replaced: f.cleaning.n_changed, replaced_beats: Array.from(f.cleaning.changed).reduce((a, v, i) => (v ? a.concat(i + 1) : a), []) } : { enabled: false },
     settings: { priors: ST.get('model.priors'), control: ST.get('model.control'), changed_from_app_defaults: ST.modelDiff(), changed_from_r_engine_defaults: ST.modelDiffVsEngine() },
     spectral_anchor: { energy_ratio: f.pr.energy_ratio, p_lf: f.pr.p_lf, p_hf: f.pr.p_hf, nu0_init: f.pr.nu0_init },
     parameters: paramRows(f, rep).map(r => ({ name: r.n, estimate: r.est, se: isFinite(r.se) ? r.se : null, ci95: isFinite(r.lo) ? [r.lo, r.hi] : null, status: r.status })),
@@ -141,15 +142,41 @@ function sessionObject(withData) {
 function sessionJSON() { download(JSON.stringify(sessionObject(true), null, 2), fname('session', 'json'), 'application/json'); toast('Saved session JSON', 'ok'); }
 
 /* ---- R script ------------------------------------------------------------------------------------------------------------------------ */
+/** The cleaning gate exactly as in tools/prep-data.R (so that the R script reproduces the cleaned series). */
+const R_CLEAN_SAMPLE = `clean_sample <- function(x, window = 50, n_mad = 3.5, n_iter = 2) {
+  one_pass <- function(x) {
+    was_na <- is.na(x)
+    if (all(was_na)) return(x)
+    if (any(was_na)) {
+      i <- seq_along(x)
+      x[was_na] <- approx(i[!was_na], x[!was_na], xout = i[was_na], rule = 2)$y
+    }
+    n <- length(x)
+    k <- min(window, if (n %% 2 == 1) n else n - 1L)
+    if (k %% 2 == 0) k <- k + 1L
+    if (k < 3L) return(x)
+    running_median <- runmed(x, k = k)
+    abs_dev <- abs(x - running_median)
+    running_mad <- pmax(1.4826 * runmed(abs_dev, k = k), median(abs_dev) * 0.1)
+    inside <- x >= running_median - n_mad * running_mad & x <= running_median + n_mad * running_mad & !was_na
+    if (sum(inside) < 2) return(rep(NA_real_, n))
+    i <- seq_len(n)
+    approx(i[inside], x[inside], xout = i, rule = 2)$y
+  }
+  cleaned <- one_pass(x)
+  if (n_iter >= 2) for (pass in seq_len(n_iter - 1L)) cleaned <- one_pass(cleaned)
+  cleaned
+}`;
 function rScript() {
   const f = ctx.fit, diff = ST.modelDiffVsEngine(), arg = o => Object.keys(o).map(k => { const v = o[k]; return `  ${k} = ${Array.isArray(v) ? 'c(' + v.join(', ') + ')' : v}`; }).join(',\n');
-  const rr = Array.from(f.dy, v => String(v)).join(', ');   // full precision: the R fit reproduces the browser fit
+  const cl = f.cleaning && f.cleaning.enabled, rr = Array.from(cl ? f.cleaning.raw : f.dy, v => String(v)).join(', ');   // full precision: the R fit reproduces the browser fit (raw values when the app cleaned them)
   const code = `# SPARK M3 -- reproduces the fit of "${ctx.label}" with the same settings (generated ${new Date().toISOString()})
 # Needs model_engine.R and the packages biwavelet, numDeriv, MASS, ggplot2, patchwork.
 suppressPackageStartupMessages({ library(biwavelet); library(numDeriv); library(MASS); library(ggplot2); library(patchwork) })
 source("model_engine.R")
 
-rr <- c(${rr})   # RR intervals (s)
+rr <- c(${rr})   # RR intervals (s)${cl ? ' as loaded (before cleaning)' : ''}
+${cl ? `\n# RR cleaning, as in the app: the gate of tools/prep-data.R (${f.cleaning.n_changed} beats replaced)\n${R_CLEAN_SAMPLE}\nrr <- clean_sample(rr, window = ${f.cleaning.opts.window}, n_mad = ${f.cleaning.opts.n_mad}, n_iter = ${f.cleaning.opts.n_iter})\n` : ''}
 
 priors <- spark_priors(${Object.keys(diff.priors).length ? '\n' + arg(diff.priors) + '\n' : ''})
 control <- spark_control(${Object.keys(diff.control).length ? '\n' + arg(diff.control) + '\n' : ''})
@@ -183,7 +210,7 @@ ${diag ? `<h2>Diagnostics</h2><div class="grid"><div class="k"><span>KS p</span>
 ${ctx.phases ? `<h2>Phases</h2><table><thead><tr><th>Phase</th><th>Duration (s)</th><th>HR (bpm)</th><th>RMSSD (ms)</th><th>mean x_p</th><th>mean x_s</th><th>Shift (σ)</th></tr></thead><tbody>${ctx.phases.map(r => r.n < 5 ? '' : `<tr><td>${r.name}</td><td class="n">${n(r.duration, 4)}</td><td class="n">${n(r.hr, 4)}</td><td class="n">${n(r.rmssdObs, 3)}</td><td class="n">${n(r.xp, 3)}</td><td class="n">${n(r.xs, 3)}</td><td class="n">${n(r.shift, 3)}</td></tr>`).join('')}</tbody></table>` : ''}
 <h2>HRV statistics</h2><table><thead><tr><th>Metric</th><th>Observed</th><th>Filtered</th></tr></thead><tbody>${[['Mean HR (bpm)', 'meanHR'], ['SDNN (ms)', 'SDNN'], ['RMSSD (ms)', 'RMSSD'], ['pNN50 (%)', 'pNN50'], ['LF (ms²)', 'LF'], ['HF (ms²)', 'HF'], ['LF/HF', 'LFHF']].map(([l, k]) => `<tr><td>${l}</td><td class="n">${n(ctx.bundle.hrvObs[k], 4)}</td><td class="n">${n(ctx.bundle.hrvFlt[k], 4)}</td></tr>`).join('')}</tbody></table>
 ${ctx.bundle && ctx.bundle.phaseHRV ? `<h2>Conventional statistics per window</h2><table><thead><tr><th>Window</th><th>Signal</th><th>HR</th><th>SDNN</th><th>RMSSD</th><th>pNN50</th><th>LF</th><th>HF</th><th>LF/HF</th></tr></thead><tbody>${ctx.bundle.phaseHRV.filter(r => r.obs).map(r => ['obs', 'flt'].map(k => `<tr><td>${k === 'obs' ? esc(r.name) : ''}</td><td>${k === 'obs' ? 'observed' : 'filtered'}</td><td class="n">${n(r[k].meanHR, 4)}</td><td class="n">${n(r[k].SDNN, 4)}</td><td class="n">${n(r[k].RMSSD, 4)}</td><td class="n">${n(r[k].pNN50, 3)}</td><td class="n">${n(r[k].LF, 4)}</td><td class="n">${n(r[k].HF, 4)}</td><td class="n">${n(r[k].LFHF, 3)}</td></tr>`).join('')).join('')}</tbody></table>` : ''}
-${X().includeSettings ? `<h2>Model settings</h2><p class="meta">${changed.length ? 'Changed from the engine defaults: <code>' + esc(JSON.stringify(diff)) + '</code>' : 'Engine defaults (M3).'}</p>` : ''}
+${X().includeSettings ? `<h2>Model settings</h2><p class="meta">${f.cleaning && f.cleaning.enabled ? 'RR cleaning: on (running median / MAD gate; window ' + f.cleaning.opts.window + ', ' + f.cleaning.opts.n_mad + ' × MAD, ' + f.cleaning.opts.n_iter + ' pass(es); ' + f.cleaning.n_changed + ' beats replaced). ' : 'RR cleaning: off. '}${changed.length ? 'Changed from the engine defaults: <code>' + esc(JSON.stringify(diff)) + '</code>' : 'Engine defaults (M3).'}</p>` : ''}
 <h2>Charts</h2>${imgs.map(i => `<figure><img src="${i.src}" alt="${esc(i.title)}"><figcaption>${esc(i.title)}</figcaption></figure>`).join('')}
 <p class="meta">Generated by the SPARK browser app. Reproduce with the exported R script (model_engine.R).</p></body></html>`;
   download(html, fname('report', 'html'), 'text/html'); toast('Saved HTML report (open it and use Print → PDF)', 'ok');

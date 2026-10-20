@@ -100,12 +100,45 @@ function resetPhasesForNewData(keep) {
   if (root.SparkPhaseEditor && root.SparkPhaseEditor.isActive()) root.SparkPhaseEditor.close();
   if (had) toast('Phase windows and markers of the previous recording were cleared.', '', 3600);
 }
-function setData(rr, label, info, keepPhases) {
+/* ---- optional RR cleaning (the gate of tools/prep-data.R): S.rrRaw is the series as loaded, S.rr the one the analysis uses ----------------------------- */
+const cleaningOptions = () => { const A = ST.get('analysis'); return { window: A.cleanWindow, n_mad: A.cleanNMad, n_iter: A.cleanNIter }; };
+function deriveSeries(raw) {
+  const A = ST.get('analysis'); S.clean = null;
+  if (!A.cleanRR || S.cleanSkip) return raw;
+  try {
+    const r = E.cleanSample(raw, cleaningOptions()); if (Array.prototype.some.call(r.y, v => !isFinite(v))) throw new Error('fewer than two valid beats');
+    S.clean = { opts: r.opts, n_changed: r.n_changed, changed: r.changed, raw: Array.from(raw) }; return Array.from(r.y);
+  } catch (e) { showAlert('err', 'RR cleaning was not applied: ' + e.message); return raw; }
+}
+/** The cleaning record attached to a fit (charts and exports read it there). */
+const cleaningRecord = () => S.clean ? { enabled: true, opts: S.clean.opts, n_changed: S.clean.n_changed, changed: S.clean.changed, raw: S.clean.raw } : { enabled: false };
+function syncCleanControls() {
+  const A = ST.get('analysis'); $('clean-on').checked = !!A.cleanRR; $('clean-window').value = A.cleanWindow; $('clean-nmad').value = A.cleanNMad; $('clean-niter').value = A.cleanNIter;
+  $('clean-controls').classList.toggle('hidden', !A.cleanRR); updateCleanSummary();
+}
+function updateCleanSummary() {
+  const A = ST.get('analysis'), el = $('clean-summary'); if (!el) return;
+  if (!A.cleanRR) { el.textContent = 'Off: the data are used as loaded.'; return; }
+  if (!S.rrRaw) { el.textContent = 'On: applied when a recording is loaded (the gate of tools/prep-data.R).'; return; }
+  if (S.cleanSkip) { el.textContent = 'Not applied to a filtered series (re-estimation).'; return; }
+  if (!S.clean) { el.textContent = 'On, but not applied (see the message above).'; return; }
+  const c = S.clean; el.textContent = `${c.n_changed} of ${c.raw.length} beats replaced (${(100 * c.n_changed / c.raw.length).toFixed(1)}%) · window ${c.opts.window}, ${c.opts.n_mad}×MAD, ${c.opts.n_iter} pass${c.opts.n_iter > 1 ? 'es' : ''}.`;
+}
+/** A cleaning setting changed: the series is derived again from the loaded one (like a change of the time unit); results are cleared, phases kept. */
+const cleanSig = () => JSON.stringify([ST.get('analysis.cleanRR'), cleaningOptions()]);
+function onCleanSettings() {
+  syncCleanControls(); if (!S.rrRaw || S.cleanSig === cleanSig()) return;
+  const had = !!S.fit; setData(S.rrRaw, S.label, S.read, true, { noClean: S.cleanSkip }); if (had) toast('Cleaning changed: run the analysis again.', '', 3000);
+}
+$('clean-on').onchange = function () { ST.set('analysis.cleanRR', this.checked); };
+[['clean-window', 'analysis.cleanWindow'], ['clean-nmad', 'analysis.cleanNMad'], ['clean-niter', 'analysis.cleanNIter']].forEach(([id, path]) => { $(id).onchange = function () { const v = parseFloat(this.value); if (!isFinite(v)) { syncCleanControls(); return; } ST.set(path, v); }; });
+function setData(rr, label, info, keepPhases, opts) {
+  S.rrRaw = rr; S.cleanSkip = !!(opts && opts.noClean); rr = deriveSeries(rr); S.cleanSig = cleanSig();
   S.rr = rr; S.label = label; S.truth = null; S.cwt = null; S.hrvObs = null; S.read = info || null; if (!info) S.raw = null; resetPhasesForNewData(keepPhases); S.auto = null; S.fit = null; S.rep = null; S.bundle = null; S.manual = false; _phaseCache = null;
-  $('data-chip').classList.add('ok'); $('data-chip-text').textContent = `${label} — ${rr.length} beats · ${rr.reduce((a, b) => a + b, 0).toFixed(1)} s${info ? ' · ' + info.unit + (info.unitSource === 'auto' ? ' (auto)' : '') : ''}`; $('unit-detected').textContent = info ? info.unit + (info.unitSource === 'auto' ? ' · auto' : info.unitSource === 'header' ? ' · header' : ' · set') : '';
+  $('data-chip').classList.add('ok'); $('data-chip-text').textContent = `${label} — ${rr.length} beats · ${rr.reduce((a, b) => a + b, 0).toFixed(1)} s${info ? ' · ' + info.unit + (info.unitSource === 'auto' ? ' (auto)' : '') : ''}${S.clean ? ' · cleaned: ' + S.clean.n_changed + ' replaced' : ''}`; $('unit-detected').textContent = info ? info.unit + (info.unitSource === 'auto' ? ' · auto' : info.unitSource === 'header' ? ' · header' : ' · set') : '';
   $('btn-run').disabled = false; $('btn-run-top').disabled = false;
   $('results-wrap').style.display = 'none'; $('empty-state').style.display = 'flex'; $('sim-result').style.display = 'none';
-  X.setContext({ fit: null, label, read: info || null }); updatePhasePanel(); emit('data', { label, beats: rr.length });
+  X.setContext({ fit: null, label, read: info || null }); updatePhasePanel(); updateCleanSummary(); emit('data', { label, beats: rr.length });
 }
 /** Phases of the recording: typed markers win; otherwise automatic detection (unless switched off). Detection uses the observed RR only. */
 let _phaseCache = null, _markerWarned = '';
@@ -146,7 +179,7 @@ async function run() {
     const job = root.SparkCompute.analyze({ rr: S.rr, priors: cfg.priors, control: cfg.control, computeSE: A.computeSE, roll: { window: A.rollWindow, step: A.rollStep }, landscape: landscapeOpts() }, (m, p) => setProgress(m, p));
     const res = await job.done; S.cwt = null;
     setProgress('Preparing the results…', 85); await tick();
-    S.fit = res.fit; S.rep = res.rep; S.manual = false;
+    S.fit = res.fit; S.fit.cleaning = cleaningRecord(); S.rep = res.rep; S.manual = false;
     S.auto = { ks: res.fit.params.ks, kp: res.fit.params.kp, lR: res.fit.params.lR, lp: res.fit.params.lp };
     syncSliders(S.auto); $('sim-result').style.display = 'none';
     renderFit(res, job);
@@ -252,12 +285,12 @@ function runPlayground(exact) {
   if (v.kp <= v.ks) { showAlert('err', 'κ_P must be greater than κ_S for a valid model.'); return; }
   try {
     const base = S.fit.pr, pr2 = Object.assign({}, base, { energy_ratio: v.lp }), fit = E.runManualFit(S.rr, pr2, S.fit.ctl, v);
-    S.manual = !exact; S.fit = fit; if (exact) { S.fit = fit; }
+    S.manual = !exact; S.fit = fit; fit.cleaning = cleaningRecord();
     renderFit(); renderSim(S.auto, v); if (exact) showAlert('ok', 'Reset to the MAP estimate.');
   } catch (e) { showAlert('err', 'Manual filter run failed: ' + e.message); console.error(e); }
 }
 $('btn-sim').onclick = () => { if (!S.auto) { showAlert('err', 'Run the main analysis first to obtain MAP-estimated defaults.'); return; } syncSliders(S.auto); runPlayground(S.auto); };
-$('btn-use-filtered').onclick = () => { if (!S.fit) { showAlert('err', 'Run the analysis first to generate a filtered RR series.'); return; } setData(Array.from(S.fit.irr), 'Filtered RR (re-estimation)', null, true); showAlert('ok', 'Filtered RR loaded as new input — click Run Analysis to re-estimate.'); };
+$('btn-use-filtered').onclick = () => { if (!S.fit) { showAlert('err', 'Run the analysis first to generate a filtered RR series.'); return; } setData(Array.from(S.fit.irr), 'Filtered RR (re-estimation)', null, true, { noClean: true }); showAlert('ok', 'Filtered RR loaded as new input — click Run Analysis to re-estimate.'); };
 $('btn-export-filtered').onclick = () => { if (!S.fit) { showAlert('err', 'Run the analysis first to generate a filtered RR series.'); return; } X.filteredRR($('exp-unit').value, $('exp-fmt').value); };
 
 /* ---- settings, export menu, shortcuts ------------------------------------------------------------------------------------------------------------ */
@@ -268,10 +301,11 @@ const exMenu = $('export-menu');
 $('btn-export').onclick = ev => { ev.stopPropagation(); const show = !exMenu.classList.contains('show'); exMenu.classList.toggle('show', show); $('btn-export').setAttribute('aria-expanded', show ? 'true' : 'false'); };
 doc.addEventListener('click', ev => { if (!ev.target.closest('.menu-wrap')) exMenu.classList.remove('show'); });
 doc.addEventListener('keydown', ev => {
+  if ($('welcome-modal') && $('welcome-modal').classList.contains('show')) return;
   const tag = (ev.target.tagName || '').toLowerCase(); if (['input', 'select', 'textarea'].includes(tag) || ev.metaKey || ev.ctrlKey || ev.altKey) { if (ev.key === 'Escape') ev.target.blur(); return; }
   const k = ev.key.toLowerCase();
   if (k === 'escape') { exMenu.classList.remove('show'); $('settings-modal').classList.remove('show'); setDrawer(false); doc.querySelectorAll('.cc.fullscreen').forEach(c => { c.classList.remove('fullscreen'); C.resizeAll(); }); }
-  else if (k === 'r') run(); else if (k === 's') { ev.preventDefault(); openSettings(); } else if (k === 'e') { exMenu.classList.toggle('show'); } else if (k === 't') $('theme-btn').click();
+  else if (k === 'r') { if ($('app').dataset.mode !== 'live') run(); } else if (k === 's') { ev.preventDefault(); openSettings(); } else if (k === 'e') { exMenu.classList.toggle('show'); } else if (k === 't') $('theme-btn').click();
   else if (/^[1-6]$/.test(k) && S.fit) showTab(TABS[+k - 1]);
 });
 let _rz; const nudge = ms => { clearTimeout(_rz); _rz = setTimeout(C.resizeAll, ms); };
@@ -294,7 +328,7 @@ ST.onChange(path => {
 
 /* ---- start --------------------------------------------------------------------------------------------------------------------------------------------- */
 async function init() {
-  ST.load(); try { root.localStorage.removeItem('spark.phasewin'); } catch (e) { /* ignore */ } applyAppearance(); syncUnitSelect(); await ST.Layout.init(); C.chartDefaults(); C.mountCards(); X.mountMenu(exMenu);
+  ST.load(); try { root.localStorage.removeItem('spark.phasewin'); } catch (e) { /* ignore */ } applyAppearance(); syncUnitSelect(); syncCleanControls(); ST.onChange(p => { if (/^analysis\.clean/.test(p) || p === '*' || p === 'analysis') onCleanSettings(); }); await ST.Layout.init(); C.chartDefaults(); C.mountCards(); X.mountMenu(exMenu);
   root.SparkPhaseEditor.init({ getWindows: () => S.preview || S.drawn, setWindows: setPhaseWindows, preview: previewWindows, getDetected: detectedWindows, getPhases: () => S.bundle && S.bundle.events, toast });
   menu = ST.mountMenu($('settings-modal'), { chartList: C.chartList, toast, download: X.download, render: () => {} });
   modelSummary(); updateSimLabels(); (root.requestIdleCallback || (f => setTimeout(f, 600)))(() => C.warmUp());
@@ -306,7 +340,7 @@ const ready = init(); ready.catch(e => console.error(e));
    ========================================================================================================================== */
 const phaseView = ev => ev ? { source: ev.source, nStressors: ev.nStressors, segments: ev.segments.map(s => ({ name: s.name, kind: s.kind, from: s.from, to: s.to })), boundaries: ev.boundaries || [] } : null;
 root.SPARK = {
-  version: '3.5.0',
+  version: '3.11.0',
   /** Pure functions without DOM: fitModel, detectPhases, parseRRDetailed, simulateSession, ... */
   engine: E,
   settings: ST, charts: C, export: X, editor: root.SparkPhaseEditor,
@@ -315,7 +349,9 @@ root.SPARK = {
     load: (text, name, opts) => { if (opts && opts.unit) ST.set('analysis.timeUnit', opts.unit, true); return loadText(String(text), name || 'data'); },
     loadRR: (rrSeconds, label) => { setData(Array.from(rrSeconds), label || 'data'); return true; },
     example: kind => { if (kind === 'multi') $('btn-example-multi').click(); else $('btn-example').click(); return S.rr ? S.rr.length : 0; },
-    get: () => S.rr ? { rr: S.rr.slice(), label: S.label, read: S.read, duration: dur() } : null
+    get: () => S.rr ? { rr: S.rr.slice(), raw: S.rrRaw ? Array.from(S.rrRaw) : null, label: S.label, read: S.read, duration: dur(), cleaning: S.clean ? { window: S.clean.opts.window, n_mad: S.clean.opts.n_mad, n_iter: S.clean.opts.n_iter, n_replaced: S.clean.n_changed } : null } : null,
+    /** Optional RR cleaning (the gate of tools/prep-data.R). setCleaning({ enabled, window, n_mad, n_iter }) changes the settings and derives the series again (results are cleared). */
+    setCleaning: o => { o = o || {}; const map = { enabled: 'cleanRR', window: 'cleanWindow', n_mad: 'cleanNMad', n_iter: 'cleanNIter' }; Object.keys(map).forEach(k => { if (k in o) ST.set('analysis.' + map[k], o[k], true); }); onCleanSettings(); return S.clean ? { n_replaced: S.clean.n_changed, window: S.clean.opts.window, n_mad: S.clean.opts.n_mad, n_iter: S.clean.opts.n_iter } : null; }
   },
   /** Run the analysis; resolves with the result bundle {fit, rep, dm, diag, events, phases, ...} (null if it failed). */
   run: () => run(),

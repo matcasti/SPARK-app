@@ -25,7 +25,7 @@ function hex6(v) {
 const css = v => hex6(raw(v, ''));
 const isLight = () => doc.documentElement.dataset.theme === 'light';
 function tc() { return { tx1: css('--tx1'), tx2: css('--tx2'), tx3: css('--tx3'), bd: css('--bd'), s0: css('--s0'), s1: css('--s1'), acc: css('--acc'), teal: css('--teal'), red: css('--red'), grn: css('--grn'), amb: css('--amb'), pur: css('--pur') }; }
-const gridColor = () => isLight() ? 'rgba(15,27,45,.075)' : 'rgba(160,185,225,.11)';
+const gridColor = () => isLight() ? 'rgba(15,27,45,.075)' : 'rgba(160,185,225,.085)';
 const withA = (hex, a) => hex6(hex) + a;                          // '#rrggbb' + 2-digit alpha
 const cfgC = () => ST.get('charts');
 /** Colours of the phases of a recording: rest blue, each stressor its own warm/cool hue, recoveries green. `ev` = {segments}. */
@@ -142,8 +142,21 @@ function buildRR(R) {
   for (let i = 0; i < n; i++) { const k = idx ? idx[i] : i, s = z * Math.sqrt(Math.max(fit.rrV[k], 0)); t[i] = fit.time[k]; irr[i] = fit.irr[k]; dy[i] = fit.dy[k]; up[i] = irr[i] + s; lo[i] = irr[i] - s; if (fit.gate[k] > fit.ctl.diag_gate_max) gated.push({ x: t[i], y: dy[i] }); }
   const ds = [ln('Observed RR', t.map((x, i) => ({ x, y: dy[i] })), withA(c.tx2, '99'), { borderWidth: 1, order: 5 }), ln('Filtered RR', t.map((x, i) => ({ x, y: irr[i] })), S, { borderWidth: cfgC().lineWidth + 0.3, order: 2 }),
     { label: 'Artifact-gated beat', data: gated, parsing: false, borderColor: 'transparent', backgroundColor: c.amb, pointRadius: 3.5, pointStyle: 'triangle', showLine: false, order: 1 }];
+  const cl = fit.cleaning; if (cl && cl.enabled && cl.n_changed) { const rep = []; for (let i = 0; i < n; i++) { const k = idx ? idx[i] : i; if (cl.changed[k]) rep.push({ x: t[i], y: cl.raw[k] }); }
+    ds.push({ label: 'Replaced by cleaning (raw value)', data: rep, parsing: false, borderColor: '#D6562B', backgroundColor: 'transparent', borderWidth: 1.5, pointRadius: 4, pointStyle: 'circle', showLine: false, order: 0 }); }
   const extra = cfgC().showCI ? [bandPlugin('ciRR', { x: t, hi: up, lo }, withA(S, '26'))] : [];
   mk('rr', { type: 'line', data: { datasets: ds }, options: timeOpts(R, 'RR interval (s)'), plugins: tsPlugins(R).concat(extra, [{ id: 'phaseEditor', afterDatasetsDraw: ch => { if (root.SparkPhaseEditor) root.SparkPhaseEditor.overlay(ch); } }]) });
+}
+/** Raw RR, cleaned RR and the beats replaced by the gate (only when the optional cleaning step was on). */
+function buildCleaning(R) {
+  const { fit } = R, cl = fit.cleaning, c = tc(), note = doc.querySelector('.cc[data-chart="cleaning"] .cc-note');
+  if (!cl || !cl.enabled) { if (note) note.textContent = ''; return setEmpty('cleaning', 'RR cleaning is off. Tick “Clean RR intervals first” in the Data panel (or Settings → Data) and run the analysis again.'); }
+  const idx = thinIdx(fit.dy.length), n = idx ? idx.length : fit.dy.length, t = new Array(n), raw = new Array(n), clean = new Array(n), rep = [];
+  for (let i = 0; i < n; i++) { const k = idx ? idx[i] : i; t[i] = fit.time[k]; raw[i] = cl.raw[k]; clean[i] = fit.dy[k]; if (cl.changed[k]) rep.push({ x: t[i], y: cl.raw[k] }); }
+  if (note) note.innerHTML = `<b>${cl.n_changed}</b> of ${fit.dy.length} beats replaced (${(100 * cl.n_changed / fit.dy.length).toFixed(1)}%) &nbsp; window ${cl.opts.window} beats · ${cl.opts.n_mad} × MAD · ${cl.opts.n_iter} pass${cl.opts.n_iter > 1 ? 'es' : ''}`;
+  const ds = [ln('Raw RR', t.map((x, i) => ({ x, y: raw[i] })), withA(c.tx2, '88'), { borderWidth: 1, order: 3 }), ln('Cleaned RR (used by the model)', t.map((x, i) => ({ x, y: clean[i] })), c.acc, { borderWidth: cfgC().lineWidth, order: 2 }),
+    { label: 'Replaced beat (raw value)', data: rep, parsing: false, borderColor: '#D6562B', backgroundColor: 'transparent', borderWidth: 1.5, pointRadius: 4, pointStyle: 'circle', showLine: false, order: 1 }];
+  mk('cleaning', { type: 'line', data: { datasets: ds }, options: timeOpts(R, 'RR interval (s)'), plugins: tsPlugins(R) });
 }
 function buildStates(R) {
   const { fit } = R, col = ST.colors(), z = 1.96, idx = thinIdx(fit.dy.length), n = idx ? idx.length : fit.dy.length;
@@ -598,6 +611,7 @@ function renderLandscape() {
 /* ============================================================================================================================ */
 const CARDS = [
   { id: 'rr', tab: 'signal', title: 'RR interval', sub: 'Observed beats, model-filtered series and its 95% credible band. Use the phase tool to mark rest, stress and recovery on it.', tip: 'c-rr', h: 300, span: 12, tools: [{ act: 'phases', title: 'Define rest / stress / recovery windows on this plot', icon: 'phases' }], build: buildRR },
+  { id: 'cleaning', tab: 'signal', title: 'RR cleaning', sub: 'Raw RR, cleaned RR and the beats replaced by the running-median / MAD gate', tip: 'c-clean', h: 240, span: 12, note: true, build: buildCleaning },
   { id: 'cwt', tab: 'signal', title: 'Time-frequency scalogram', sub: 'Morlet wavelet power of heart rate (log colour scale)', tip: 'c-cwt', kind: 'cwt', h: 340, span: 12, build: buildCWT },
   { id: 'psd', tab: 'signal', title: 'Power spectrum', sub: 'Empirical vs reconstructed PSD of heart rate', tip: 'c-psd', h: 280, span: 6, build: buildPSD },
   { id: 'poincare', tab: 'signal', title: 'Poincaré plot', sub: 'Each beat against the next: observed and filtered RR', tip: 'c-poin', h: 280, span: 6, build: buildPoincare },

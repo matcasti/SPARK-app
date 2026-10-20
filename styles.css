@@ -31,7 +31,7 @@ html[data-theme="light"]{
 }
 
 /* ── BASE ── */
-body{font-family:var(--font-ui);font-feature-settings:'cv11','ss01','tnum' 0;background:radial-gradient(1100px 520px at 85% -8%,color-mix(in srgb,var(--acc) 7%,transparent),transparent 60%),var(--bg);background-attachment:fixed;color:var(--tx1);min-height:100vh;min-height:100dvh;min-width:320px;line-height:1.55;overflow-wrap:break-word;transition:background var(--tr),color var(--tr)}
+body{font-family:var(--font-ui);font-feature-settings:'cv11','ss01','tnum' 0;background:radial-gradient(1100px 520px at 85% -8%,color-mix(in srgb,var(--acc) 7%,transparent),transparent 60%),var(--bg);background-attachment:fixed;color:var(--tx1);min-height:100vh;min-height:100dvh;min-width:0;line-height:1.55;overflow-wrap:break-word;transition:background var(--tr),color var(--tr)}
 body.no-scroll{overflow:hidden}
 
 /* ── TOPBAR ── */
@@ -457,4 +457,133 @@ details.set-grp.adv[open]>summary::before{transform:rotate(90deg)}
 .site-footer{text-align:center;padding:22px 16px 18px;font-size:.69rem;color:var(--tx3);border-top:1px solid var(--bd);margin-top:24px;letter-spacing:.02em;transition:color var(--tr)}
 .site-footer .ft-heart{color:var(--red);font-size:.8rem;vertical-align:-.05em;display:inline-block;transition:transform .2s ease}
 .site-footer:hover .ft-heart{transform:scale(1.25)}
+/* RR cleaning (sidebar) */
+.chk-inline{display:flex;align-items:center;gap:7px;font-size:.74rem;color:var(--tx);cursor:pointer}
+.chk-inline input{width:15px;height:15px;accent-color:var(--acc)}
+.clean-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:7px}
+.clean-grid label{display:flex;flex-direction:column;gap:2px;font-size:.6rem;color:var(--tx2)}
+.clean-grid input{width:100%;padding:5px 6px;font-size:.72rem;font-family:var(--font-ui);background:var(--s2);border:1px solid var(--bd);border-radius:var(--rx);color:var(--tx)}
+.clean-grid input:focus{border-color:var(--acc);outline:none}
+/* Live section (Polar H10) */
+.mode-switch{display:inline-flex;border:1px solid var(--bd);border-radius:var(--rs);overflow:hidden;height:30px}
+.mode-btn{display:inline-flex;align-items:center;gap:6px;padding:0 12px;border:none;background:var(--s1);color:var(--tx2);font:600 .72rem var(--font-ui);cursor:pointer}
+.mode-btn+.mode-btn{border-left:1px solid var(--bd)}
+.mode-btn.active{background:var(--acc);color:#fff}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--tx3,#7c8aa5);display:inline-block}
+.live-dot.on{background:#3fcf8e;box-shadow:0 0 0 3px rgba(63,207,142,.25);animation:livepulse 1.4s infinite}
+.live-dot.warn{background:#f0a73a}
+@keyframes livepulse{50%{opacity:.45}}
+#app:not([data-mode="live"]) .live-panel,#app:not([data-mode="live"]) #live-view{display:none}
+#app[data-mode="live"] #sidebar>.panel:not(.live-panel){display:none}
+#app[data-mode="live"] #empty-state,#app[data-mode="live"] #results-wrap{display:none!important}
+#app[data-mode="live"] #btn-run-top,#app[data-mode="live"] #btn-export{display:none}
+#live-view{display:flex;flex-direction:column;gap:14px}
+.live-hrbox{display:flex;align-items:baseline;gap:6px;margin-bottom:8px}
+.live-hr{font:650 2.2rem var(--font-mono);letter-spacing:-.03em;color:var(--tx1);line-height:1}
+.live-hr-unit{font-size:.7rem;color:var(--tx2)}
+.live-meta{font-size:.64rem;color:var(--tx2);margin:-2px 0 10px;min-height:1em;line-height:1.5}
+.live-counts{font-size:.68rem;color:var(--tx2);line-height:1.55;margin-bottom:9px}
+.live-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 12px;border:1px solid var(--bd);border-radius:var(--r);background:var(--s0);font-size:.76rem;color:var(--tx1)}
+.live-banner .pill{flex:0 0 auto}
+.pill.live-ok{color:var(--grn);border-color:var(--grn)}.pill.live-warn{color:var(--amb);border-color:var(--amb)}.pill.live-bad{color:#e0584a;border-color:#e0584a}
+.live-card{background:var(--s0);border:1px solid var(--bd);border-radius:var(--r);padding:16px 18px 14px;box-shadow:var(--shadow);position:relative;display:flex;flex-direction:column;min-width:0}
+.live-card[hidden]{display:none}
+.live-card .cc-body{flex:0 0 auto;min-height:0;height:250px}   /* the height is set by live_ui.js: between half and twice the width */
+#live-view .metric-wrap{margin-bottom:0}
+/* Welcome message */
+.welcome-modal{align-items:center;padding:12px;z-index:500}
+.wm-card{width:min(760px,100%);height:auto;max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px);border-radius:var(--r)}
+.wm-card .modal-head .spark-tag{flex:0 0 auto}
+.wm-body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:14px 18px 6px}
+.wm-lead{font-size:.86rem;line-height:1.55;color:var(--tx1);margin:0 0 12px}
+.wm-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.wm-card-i{border:1px solid var(--bd);border-radius:var(--rs);background:var(--s1);padding:10px 12px;min-width:0}
+.wm-card-i h3{font:650 .78rem var(--font-ui);color:var(--tx1);margin:0 0 4px}
+.wm-card-i p{font-size:.7rem;line-height:1.5;color:var(--tx2);margin:0;overflow-wrap:anywhere}
+.wm-tip{font-size:.68rem;color:var(--tx2);margin:12px 0 8px}
+.wm-quick{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}.wm-quick .btn{width:auto}
+.wm-curious{border:1px solid var(--bd);border-radius:var(--rs);margin-bottom:10px;background:var(--s0)}
+.wm-curious summary{cursor:pointer;padding:8px 12px;font:600 .74rem var(--font-ui);color:var(--tx1);list-style-position:inside}
+.wm-more{padding:2px 12px 8px}.wm-more p{font-size:.7rem;line-height:1.58;color:var(--tx2);margin:0 0 8px;overflow-wrap:anywhere}.wm-more b{color:var(--tx1)}
+.wm-more code{font-family:var(--font-mono);font-size:.66rem}
+body.wm-open{overflow:hidden}
+@media(max-width:560px){.wm-grid{grid-template-columns:minmax(0,1fr)}.wm-card{max-height:calc(100dvh - 12px)}.welcome-modal{padding:6px}.wm-body{padding:12px 14px 4px}.wm-quick .btn{flex:1 1 100%}}
+@media(max-height:520px) and (orientation:landscape){.welcome-modal{padding:4px}.wm-card{max-height:calc(100dvh - 8px)}.wm-lead{font-size:.78rem}}
+/* Top bar on phones (<= 560 px): two rows - menu, brand and the three icon buttons on the first; section switch, Run and Export on the second. Nothing is clipped down to 320 px. */
+.tb-break{display:none}
+@media(max-width:560px){
+  :root{--th:calc(80px + var(--sat))}
+  .topbar{flex-wrap:wrap;align-content:center;row-gap:8px;column-gap:6px}
+  .tb-right{display:contents}
+  .tb-break{display:block;flex:0 0 100%;height:0;order:5}
+  #menu-btn{order:0}.tb-brand{order:1;flex:1 1 0}
+  #btn-help{order:2}#btn-settings{order:3}#theme-btn{order:4}
+  .mode-switch{order:6;flex:1 1 0;min-width:0}.mode-btn{flex:1 1 0;justify-content:center;padding:0 8px}
+  #btn-run-top{order:7}.topbar .menu-wrap{order:8}
+  .model-badge{display:none}
+  .topbar .btn-top .lbl{display:inline}
+  .topbar .btn-top{padding:0 10px}
+}
+/* touch: enlarge the hit area of small controls without changing how they look */
+@media(hover:none),(max-width:860px){
+  .info-btn{position:relative}.info-btn::after{content:"";position:absolute;inset:-7px}
+  .cc select.mini{min-height:26px}
+}
+/* horizontally scrollable navs (results tabs, settings sections): a soft shadow shows on the side where more tabs are hidden */
+.tab-nav{--navbg:var(--bg)}.set-nav{--navbg:var(--s0)}
+@media(max-width:860px){
+  .tab-nav,.set-nav{background-image:linear-gradient(to right,var(--navbg),var(--navbg)),linear-gradient(to left,var(--navbg),var(--navbg)),linear-gradient(to right,rgba(0,0,0,.22),rgba(0,0,0,0)),linear-gradient(to left,rgba(0,0,0,.22),rgba(0,0,0,0));
+    background-position:left center,right center,left center,right center;background-repeat:no-repeat;background-size:26px 100%,26px 100%,12px 100%,12px 100%;background-attachment:local,local,scroll,scroll}
+}
+.live-hr.dim{color:var(--tx3,#7c8aa5);font-weight:400}
+/* chart card header on phones: the tools drop to a second line instead of squeezing the title */
+@media(max-width:560px){.cc-head{flex-wrap:wrap}.cc-head .cc-lbl{flex:1 1 100%}.cc-tools{margin-left:auto}}
+/* Live plots side by side when there is room (each at least 560 px wide); each plot keeps a height between half and twice its width */
+.live-plots{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:stretch}
+@container (min-width:760px){#live-metrics{grid-template-columns:repeat(6,minmax(0,1fr))}}
 
+/* ===== Breathing room between buttons ===== */
+.cc-tools{gap:5px;flex-wrap:wrap;justify-content:flex-end;row-gap:4px}
+.menu button{margin-bottom:2px}.menu button:last-child{margin-bottom:0}
+.set-nav button{margin-bottom:4px}
+.pair{gap:8px}
+.set-row{row-gap:6px}
+#live-stop{margin-top:8px}
+@media(max-width:860px){.set-nav{gap:4px}.set-nav button{margin:0}}
+
+/* ===== Very small screens ===== */
+@media(max-width:360px){
+  .topbar{column-gap:4px;padding-left:max(6px,env(safe-area-inset-left));padding-right:max(6px,env(safe-area-inset-right))}
+  .icon-btn{width:28px;height:28px}
+  .mode-btn{padding:0 6px;font-size:.66rem;gap:4px}
+  .topbar .btn-top{padding:0 8px;gap:4px;font-size:.7rem}
+  .content{padding-left:max(6px,env(safe-area-inset-left));padding-right:max(6px,env(safe-area-inset-right))}
+  .cc{padding:8px}.cc-head{gap:4px 6px}
+  .tab-btn{padding:6px 9px;font-size:.7rem}
+  .metric-grid{gap:6px}.mc{padding:8px 9px}
+  .wm-body{padding:10px 10px 4px}.wm-card-i{padding:8px 9px}.modal-head,.modal-foot{padding-left:12px;padding-right:12px}
+  .set-pane{padding:12px 12px}
+}
+@media(max-width:300px){
+  .topbar .btn-top .lbl{display:none}
+  .tb-brand{gap:6px}
+  .mc-val{font-size:.95rem}
+  .live-hr{font-size:1.8rem}
+  .wm-quick .btn,.wm-card .btn{font-size:.7rem}
+  .mode-btn .live-dot{display:none}
+}
+@media(max-width:260px){
+  .metric-grid{grid-template-columns:minmax(0,1fr)}
+  .ex-row,.wm-grid{grid-template-columns:minmax(0,1fr)}
+  .live-sim-row{grid-template-columns:minmax(0,1fr)}
+}
+/* very short screens: the top bar scrolls away with the page instead of taking a fixed share of a few hundred pixels */
+@media(max-height:420px){
+  :root{--th:0px}
+  .topbar{position:relative;inset:auto;height:auto;min-height:44px;padding-top:max(6px,var(--sat));padding-bottom:6px}
+  .workspace{padding-top:0}
+  .modal{padding:4px}
+  .modal-card{height:calc(100vh - 8px);height:calc(100dvh - 8px);border-radius:12px}
+  .modal-head{padding-top:8px;padding-bottom:8px}.modal-foot{padding-top:8px;padding-bottom:8px}
+  .menu{max-height:calc(100dvh - 12px)}
+}

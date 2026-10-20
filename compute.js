@@ -11,16 +11,19 @@
 function stageAnchor(E, a) { return E.extractSpectralPriors(a.rr, a.priors); }
 function stageFit(E, a, pr) { return E.fitFromAnchor(a.rr, pr, a.control); }
 function stageRep(E, a, fit) { return a.computeSE ? E.reportModel(fit) : null; }
+/** Live reconstruction: only the spectral anchor and the MAP fit; returns what the filter needs (small message). */
+function stageLive(E, a) { const pr = E.extractSpectralPriors(a.rr, a.priors), fit = E.fitFromAnchor(a.rr, pr, a.control); return { params: fit.params, pr: pr, opt: { convergence: fit.opt.convergence, value: fit.opt.value }, LL_star: fit.LL_star }; }
 function stageDerived(E, a, fit) { return { dm: E.derivedMetrics(fit), diag: E.innovationDiagnostics(fit) }; }
 function stageExtras(E, a, fit, dm) {
   return { psd: E.hrPSD(fit.dy, fit.irr, fit.time), hrvObs: E.hrvStats(fit.dy, fit.pr), hrvFlt: E.hrvStats(fit.irr, fit.pr), roll: E.rollingStats(fit.time, fit.dy, fit.irr, a.roll.window, a.roll.step),
            land: E.stateLandscape(fit.Xp, fit.Xs, dm.sdP_ss, dm.sdS_ss, a.landscape), cwt: E.cwtDisplay(fit.dy) };
 }
 const WORKER_MAIN = `
-${stageAnchor}\n${stageFit}\n${stageRep}\n${stageDerived}\n${stageExtras}
+${stageAnchor}\n${stageFit}\n${stageRep}\n${stageLive}\n${stageDerived}\n${stageExtras}
 self.onmessage = function (ev) {
   const m = ev.data, E = self.SparkEngine, post = (type, extra) => self.postMessage(Object.assign({ id: m.id, type }, extra));
   try {
+    if (m.kind === 'live') { post('live', { out: stageLive(E, m.args) }); return; }
     const a = m.args; post('progress', { msg: 'Extracting Morlet CWT spectral anchor…', pct: 8 }); const pr = stageAnchor(E, a);
     post('progress', { msg: 'Running 3-D BFGS (M3)…', pct: 25 }); const fit = stageFit(E, a, pr);
     post('progress', { msg: a.computeSE ? 'Hessian, standard errors and Laplace posterior…' : 'Computing statistics…', pct: 62 }); const rep = stageRep(E, a, fit);
@@ -39,6 +42,7 @@ function startWorker() {
     worker.onmessage = ev => { const m = ev.data, j = jobs.get(m.id); if (!j) return;
       if (m.type === 'progress') j.onProgress && j.onProgress(m.msg, m.pct);
       else if (m.type === 'done') j.resolve(m.out);
+      else if (m.type === 'live') { jobs.delete(m.id); j.resolve(m.out); }
       else if (m.type === 'extras') { jobs.delete(m.id); j.extras.resolve(m.extras); }
       else if (m.type === 'error') { jobs.delete(m.id); j.reject(new Error(m.message)); j.extras.resolve(null); } };
     worker.onerror = () => { usable = false; const pend = Array.from(jobs.values()); jobs.clear(); try { worker.terminate(); } catch (e) { /* ignore */ } worker = null; pend.forEach(j => { j.fallback && j.fallback(); }); };
@@ -71,5 +75,14 @@ function analyze(args, onProgress) {
   try { worker.postMessage({ id, args }); } catch (e) { jobs.delete(id); usable = false; return main(); }
   return result;
 }
-root.SparkCompute = { analyze, isWorker: () => usable === true, terminate: () => { if (worker) { worker.terminate(); worker = null; usable = null; jobs.clear(); } } };
+/** Fit for the live stream: args = {rr, priors, control}. @return Promise<{params, pr, opt, LL_star}> (Web Worker, or the main thread where workers are unavailable). */
+function fitLive(args) {
+  const E = root.SparkEngine, onMain = (resolve, reject) => setTimeout(() => { try { resolve(stageLive(E, args)); } catch (e) { reject(e); } }, 0);
+  if (!startWorker()) return new Promise(onMain);
+  return new Promise((resolve, reject) => {
+    const id = nextId++, job = { resolve, reject, extras: { resolve() {} }, fallback: () => onMain(resolve, reject) }; jobs.set(id, job);
+    try { worker.postMessage({ id, kind: 'live', args }); } catch (e) { jobs.delete(id); usable = false; job.fallback(); }
+  });
+}
+root.SparkCompute = { analyze, fitLive, isWorker: () => usable === true, terminate: () => { if (worker) { worker.terminate(); worker = null; usable = null; jobs.clear(); } } };
 })(typeof window !== 'undefined' ? window : globalThis);

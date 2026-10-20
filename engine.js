@@ -153,6 +153,69 @@ function sparkControl(user) {
   return c;
 }
 
+/* ---- RR cleaning: port of clean_sample() in tools/prep-data.R (running-median / MAD gate, rejected values replaced by linear interpolation) ---------- */
+const DEFAULT_CLEAN = { window: 50, n_mad: 3.5, n_iter: 2 };
+function cleanOptions(user) {
+  const c = Object.assign({}, DEFAULT_CLEAN, user || {});
+  checkRange('cleaning window', c.window, 3, Infinity); checkRange('cleaning MAD multiplier', c.n_mad, 0, Infinity, true); checkRange('cleaning passes', c.n_iter, 1, 50);
+  c.window = Math.floor(c.window); c.n_iter = Math.floor(c.n_iter);
+  return c;
+}
+const med3 = (a, b, c) => Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
+function medianOf(a) { const s = Float64Array.from(a).sort(), n = s.length; return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2; }
+/** stats::smoothEnds(y, k): shrinking medians at the ends and Tukey's end-point rule (R's endrule = "median" of runmed). */
+function smoothEnds(y, k) {
+  const kk = Math.floor(k / 2); if (kk < 1) return y;
+  const n = y.length, sm = Float64Array.from(y), medOdd = arr => { const t = Float64Array.from(arr).sort(); return t[(t.length - 1) / 2]; };
+  if (kk >= 2) {
+    sm[1] = med3(y[0], y[1], y[2]); sm[n - 2] = med3(y[n - 1], y[n - 2], y[n - 3]);
+    if (kk >= 3) for (let i = 3; i <= kk; i++) { const j = 2 * i - 1; sm[i - 1] = medOdd(y.slice(0, j)); sm[n - i] = medOdd(y.slice(n - j)); }
+  }
+  sm[0] = med3(y[0], sm[1], sm[1] - 2 * (sm[2] - sm[1]));
+  sm[n - 1] = med3(y[n - 1], sm[n - 2], sm[n - 2] - 2 * (sm[n - 3] - sm[n - 2]));
+  return sm;
+}
+/** stats::runmed(x, k) with endrule = "median": centred running median, ends by smoothEnds. k is odd and not larger than n. */
+function runmed(x, k) {
+  const n = x.length; if (k > n) k = 1 + 2 * Math.floor((n - 1) / 2);
+  const h = (k - 1) / 2, res = Float64Array.from(x), win = new Float64Array(k);
+  for (let i = h; i < n - h; i++) { for (let j = 0; j < k; j++) win[j] = x[i - h + j]; win.sort(); res[i] = win[h]; }
+  return smoothEnds(res, k);
+}
+/** approx(ix, iy, xout = 0..n-1, rule = 2): linear interpolation, constant beyond the ends (ix ascending). */
+function approxConst(ix, iy, n) {
+  const out = new Float64Array(n), m = ix.length; let j = 0;
+  for (let p = 0; p < n; p++) {
+    if (p <= ix[0]) out[p] = iy[0]; else if (p >= ix[m - 1]) out[p] = iy[m - 1];
+    else { while (ix[j + 1] < p) j++; out[p] = ix[j + 1] === p ? iy[j + 1] : iy[j] + (iy[j + 1] - iy[j]) * (p - ix[j]) / (ix[j + 1] - ix[j]); }
+  }
+  return out;
+}
+function cleanPass(x, window, nMad) {
+  const n = x.length, wasNA = Array.from(x, v => !isFinite(v));
+  if (wasNA.every(Boolean)) return Float64Array.from(x);
+  let xs = Float64Array.from(x);
+  if (wasNA.some(Boolean)) {
+    const ix = [], iy = []; for (let i = 0; i < n; i++) if (!wasNA[i]) { ix.push(i); iy.push(x[i]); }
+    const fill = approxConst(ix, iy, n); for (let i = 0; i < n; i++) if (wasNA[i]) xs[i] = fill[i];
+  }
+  let k = Math.min(window, n % 2 === 1 ? n : n - 1); if (k % 2 === 0) k += 1;
+  if (k < 3) return xs;
+  const rm = runmed(xs, k), ad = xs.map((v, i) => Math.abs(v - rm[i])), rmad0 = runmed(ad, k), floor = medianOf(ad) * 0.1;
+  const ix = [], iy = [];
+  for (let i = 0; i < n; i++) { const mad = Math.max(1.4826 * rmad0[i], floor); if (xs[i] >= rm[i] - nMad * mad && xs[i] <= rm[i] + nMad * mad && !wasNA[i]) { ix.push(i); iy.push(xs[i]); } }
+  if (ix.length < 2) return new Float64Array(n).fill(NaN);
+  return approxConst(ix, iy, n);
+}
+/** clean_sample(): the gate is applied n_iter times; the length is preserved. @return {y, changed (Uint8Array), n_changed, opts} (y is all NaN when fewer than two values are valid). */
+function cleanSample(x, user) {
+  const o = cleanOptions(user), orig = Float64Array.from(x); let y = cleanPass(orig, o.window, o.n_mad);
+  for (let pass = 1; pass < o.n_iter; pass++) y = cleanPass(y, o.window, o.n_mad);
+  const changed = new Uint8Array(orig.length); let nc = 0;
+  for (let i = 0; i < orig.length; i++) if (isFinite(orig[i]) && isFinite(y[i]) && Math.abs(y[i] - orig[i]) > 1e-9) { changed[i] = 1; nc++; }
+  return { y, changed, n_changed: nc, opts: o };
+}
+
 /* ---- Morlet CWT as in biwavelet::wt (dj = 1/12, s0 = 2 dt, zero padding, cone of influence) ----------- */
 /** @return {power: Float32Array[] (one row per scale, n columns), period, scale, coi (per column), freqs, dt} */
 function biwaveletMorlet(x0, dt, opts) {
@@ -883,7 +946,7 @@ function parseRRDetailed(text, opts) {
 function parseRR(txt, opts) { const r = parseRRDetailed(txt, opts); return r.error ? null : r; }
 
 const API = { fftCore, pow2, mean, median, sd, pnorm, qnorm, makeSpline, monoSpline, DEFAULT_PRIORS, R_ENGINE_PRIOR_DEFAULTS, DEFAULT_CONTROL, sparkPriors, sparkControl, biwaveletMorlet, hrGrid,
-  extractSpectralPriors, ouBlock, artifactGate, runGLSFilter, thetaToPar, parToTheta, logPriorTerms, objectiveMap, bfgsR, fitModel, fitFromAnchor, assembleFit, runManualFit,
+  DEFAULT_CLEAN, cleanOptions, cleanSample, runmed, extractSpectralPriors, ouBlock, artifactGate, runGLSFilter, thetaToPar, parToTheta, logPriorTerms, objectiveMap, bfgsR, fitModel, fitFromAnchor, assembleFit, runManualFit,
   numHessian, eigenSym, pinv, reportModel, pacf, acf, ksUniform, innovationDiagnostics, derivedMetrics, hrvStats, rollingStats, crossCorr, stateLandscape, computePSD, hrPSD, cwtDisplay, simulateSession, genExampleSession, genExampleMulti, genExampleRR, genLegacyExampleRR, detectPhases, phasesFromMarkers, phasesFromWindows, paintWindow, phaseSummary, phaseHRV, parseRR, parseRRDetailed, guessUnit, UNIT_FACTOR, UNIT_NAME };
 root.SparkEngine = API;
 return API;
