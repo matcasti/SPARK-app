@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link href="styles.css?v=3.11.1" rel="stylesheet">
+<link href="styles.css?v=3.11.2" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
@@ -290,9 +290,9 @@
       <details class="wm-curious" id="wm-curious"><summary>For the curious: the model and the engine</summary>
         <div class="wm-more">
           <p><b>The model (M3).</b> Two latent Ornstein–Uhlenbeck drives, x_p (fast, a time constant of seconds, vagal-like) and x_s (slow, minutes, sympathetic-like), set the instantaneous rate ν(t) = ν₀ − x_p + x_s of an integrate-and-fire pacemaker: a beat occurs when the integrated phase reaches 1 and the phase then resets. Noise at the threshold gives the RR jitter.</p>
-          <p><b>Estimation.</b> An exact Kalman filter on the phase-domain model, with ν₀ and the global scale profiled out (concentrated GLS likelihood). Three parameters (κ_S, κ_P, Λ_R) are fitted by maximum a posteriori, with weak log-normal priors on τ_P, τ_S and the jitter and a prior on the separation of the two time scales. Standard errors come from the numerical Hessian (delta method).</p>
+          <p><b>Estimation.</b> An exact Kalman filter on the phase-domain model, with ν₀ and the global scale profiled out (concentrated GLS likelihood). Three parameters (κ_S, κ_P, Λ_R) are fitted by maximum a posteriori, with informative log-normal priors on τ_P, τ_S and the jitter and a prior on the separation of the two time scales. Standard errors come from the numerical Hessian (delta method).</p>
           <p><b>The spectral anchor.</b> The vagal-to-sympathetic variance ratio V_P/V_S cannot be identified from RR alone. It is fixed from a Morlet wavelet spectrum of heart rate, split logistically at 0.1 Hz with a vagal floor (default 0.25). It decides how a sustained change is shared between the two drives, so read that split as conditional on the anchor.</p>
-          <p><b>The engine.</b> A JavaScript port of the R engine (<code>model_engine.R</code>) that agrees with it to about 1e-9 in states and likelihood. Heavy work runs in a Web Worker, and ectopic or noisy beats are down-weighted by an artifact multiplier. The states are model-based latent drives, not recordings of nerve activity; in Live they are causal filtered estimates, so they lag sudden changes.</p>
+          <p><b>The engine.</b> A JavaScript port of the R engine (<code>model_engine.R</code>): the filter agrees with it to about 1e-9 in states and likelihood, and the wavelet-based spectral anchor to about 1e-4. Heavy work runs in a Web Worker, and ectopic or noisy beats are down-weighted by an artifact multiplier. The states are model-based latent drives, not recordings of nerve activity; in Live they are causal filtered estimates, so they lag sudden changes.</p>
         </div></details>
     </div>
     <div class="modal-foot"><label class="chk-inline"><input type="checkbox" id="wm-never"><span>Don’t show this again</span></label><span class="grow"></span><button class="btn btn-primary" id="wm-start">Get started</button></div>
@@ -305,16 +305,16 @@
   Made with <span class="ft-heart">♥</span> by Matías Castillo-Aguilar
 </footer>
 
-<script src="engine.js?v=3.11.1"></script>
-<script src="compute.js?v=3.11.1"></script>
-<script src="live.js?v=3.11.1"></script>
-<script src="settings.js?v=3.11.1"></script>
-<script src="charts.js?v=3.11.1"></script>
-<script src="export.js?v=3.11.1"></script>
-<script src="editor.js?v=3.11.1"></script>
-<script src="tips.js?v=3.11.1"></script>
-<script src="app.js?v=3.11.1"></script>
-<script src="live_ui.js?v=3.11.1"></script>
-<script src="welcome.js?v=3.11.1"></script>
+<script src="engine.js?v=3.11.2"></script>
+<script src="compute.js?v=3.11.2"></script>
+<script src="live.js?v=3.11.2"></script>
+<script src="settings.js?v=3.11.2"></script>
+<script src="charts.js?v=3.11.2"></script>
+<script src="export.js?v=3.11.2"></script>
+<script src="editor.js?v=3.11.2"></script>
+<script src="tips.js?v=3.11.2"></script>
+<script src="app.js?v=3.11.2"></script>
+<script src="live_ui.js?v=3.11.2"></script>
+<script src="welcome.js?v=3.11.2"></script>
 </body>
 </html>

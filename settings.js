@@ -208,7 +208,7 @@ const SCHEMA = [
       { path: 'charts.colorP', label: 'Vagal-like (x_p) colour', type: 'color', hint: 'Empty = theme default' },
       { path: 'charts.colorS', label: 'Sympathetic-like (x_s) colour', type: 'color', hint: 'Empty = theme default' },
       { path: 'charts.lineWidth', label: 'Line width', type: 'number', min: 0.5, max: 4, step: 0.1 },
-      { path: 'charts.showCI', label: 'Show 95% credible bands', type: 'checkbox' },
+      { path: 'charts.showCI', label: 'Show 95% bands (conditional on the fitted parameters)', type: 'checkbox' },
       { path: 'charts.showGrid', label: 'Show grid lines', type: 'checkbox' },
       { path: 'charts.maxPoints', label: 'Max points per line', type: 'number', min: 300, max: 20000, step: 100, hint: 'Longer series are thinned for drawing only; 0 = never thin' },
       { path: 'charts.palette', label: 'Heat-map palette', type: 'select', options: PALETTES.map(p => [p, p]), hint: 'Scalogram and landscape' }] },

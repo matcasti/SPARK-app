@@ -29,16 +29,16 @@ function paramRows(fit, rep) {
   const p = fit.params, pr = fit.pr, ctl = fit.ctl, se = rep ? rep.se : {}, g = (est, s) => ({ est, se: s, lo: isFinite(s) ? est - 1.96 * s : NaN, hi: isFinite(s) ? est + 1.96 * s : NaN });
   const row = (n, group, gc, interp, status, est, s) => Object.assign({ n, group, gc, interp, status }, g(est, s == null ? NaN : s));
   return [
-    row('ν₀', 'Baseline', 'g-base', 'Intrinsic SA node pacing rate absent autonomic tone (Hz)', 'Profiled — GLS', p.nu0),
+    row('ν₀', 'Baseline', 'g-base', 'Baseline pacing rate of the model (Hz); ν(t) = ν₀ − x_p + x_s', 'Profiled — GLS', p.nu0),
     row('σ²sys', 'Scale', 'g-sc', 'Global stochastic system variance multiplier', 'Profiled — GLS', p.sig2),
-    row('κ_S', 'Kinetic', 'g-kin', 'Clearance rate of sympathetic neurotransmitters (Hz)', 'Estimated — MAP', p.ks, se.ks),
-    row('κ_P', 'Kinetic', 'g-kin', 'Clearance rate of vagal neurotransmitters (Hz)', 'Estimated — MAP', p.kp, se.kp),
-    row('τ_S', 'Kinetic', 'g-kin', 'Sympathetic e-folding time 1/κ_S (s)', 'Derived — MAP', 1 / p.ks, se.tau_s),
-    row('τ_P', 'Kinetic', 'g-kin', 'Parasympathetic e-folding time 1/κ_P (s)', 'Derived — MAP', 1 / p.kp, se.tau_p),
-    row('σ_S', 'Volatility', 'g-vol', 'Sympathetic drive amplitude', 'Profiled — GLS', p.sigS),
-    row('σ_P', 'Volatility', 'g-vol', 'Vagal drive amplitude', 'Derived — spectral', p.sigP),
-    row('Λ_P', 'Ratio', 'g-rat', 'V_P/V_S: logistic CWT partition (Parseval anchor)', 'Fixed — spectral', p.lp),
-    row('Λ_R', 'Ratio', 'g-rat', 'Noise-to-signal ratio from SA node threshold jitter', 'Estimated — MAP', p.lR, se.lR),
+    row('κ_S', 'Kinetic', 'g-kin', 'Clearance rate of the slow, sympathetic-like drive (Hz)', 'Estimated — MAP', p.ks, se.ks),
+    row('κ_P', 'Kinetic', 'g-kin', 'Clearance rate of the fast, vagal-like drive (Hz)', 'Estimated — MAP', p.kp, se.kp),
+    row('τ_S', 'Kinetic', 'g-kin', 'Slow-drive e-folding time 1/κ_S (s); mostly set by its prior', 'Derived — MAP', 1 / p.ks, se.tau_s),
+    row('τ_P', 'Kinetic', 'g-kin', 'Fast-drive e-folding time 1/κ_P (s)', 'Derived — MAP', 1 / p.kp, se.tau_p),
+    row('σ_S', 'Volatility', 'g-vol', 'Amplitude of the sympathetic-like drive', 'Profiled — GLS', p.sigS),
+    row('σ_P', 'Volatility', 'g-vol', 'Amplitude of the vagal-like drive', 'Derived — spectral', p.sigP),
+    row('Λ_P', 'Ratio', 'g-rat', 'V_P/V_S: logistic CWT partition (spectral anchor, fixed from the recording)', 'Fixed — spectral', p.lp),
+    row('Λ_R', 'Ratio', 'g-rat', 'Noise-to-signal ratio from threshold-crossing jitter', 'Estimated — MAP', p.lR, se.lR),
     row('Jitter', 'Ratio', 'g-rat', 'Equivalent RR timing jitter SD at the median RR (ms)', 'Derived — MAP', p.rr_jitter_ms),
     row('θ_jump', 'Robustness', 'g-rob', 'Relative RR jump threshold of the artifact gate', 'Fixed — setting', ctl.jump_threshold),
     row('p_jump', 'Robustness', 'g-rob', 'Steepness of the artifact gate', 'Fixed — setting', ctl.jump_power)

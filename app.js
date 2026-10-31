@@ -226,11 +226,11 @@ function renderTables(R) {
   $('param-tbody').innerHTML = X.paramRows(fit, rep).map(r => `<tr><td class="pn">${r.n}</td><td class="pg"><span class="gtag ${r.gc}">${r.group}</span></td><td class="pv">${f4(r.est)}</td><td class="pse">${isFinite(r.se) ? Number(r.se).toPrecision(3) : '—'}</td><td class="pci">${isFinite(r.lo) ? '[' + Number(r.lo).toPrecision(4) + ', ' + Number(r.hi).toPrecision(4) + ']' : '—'}</td><td class="pi">${r.interp}</td><td class="ps">${r.status}</td></tr>`).join('');
   $('se-note').textContent = S.manual ? 'Manual parameter values: standard errors are not defined for a manual run.' : rep ? 'SE and 95% intervals: numerical Hessian of the MAP objective with the delta method (as report_model in the R engine). Profiled, fixed and derived parameters have no SE.' : 'Standard errors are switched off (Settings → Analysis).';
   const items = [
-    { l: 'Heart rate', v: (p.nu0 * 60).toFixed(1), u: 'bpm', hi: true, t: 'm-hr' }, { l: 'τ Sympathetic', v: (1 / p.ks).toFixed(1), u: 's', t: 'm-ts' }, { l: 'τ Parasympathetic', v: (1 / p.kp).toFixed(2), u: 's', t: 'm-tp' },
+    { l: 'Baseline rate ν₀', v: (p.nu0 * 60).toFixed(1), u: 'bpm', hi: true, t: 'm-hr' }, { l: 'τ Sympathetic', v: (1 / p.ks).toFixed(1), u: 's', t: 'm-ts' }, { l: 'τ Parasympathetic', v: (1 / p.kp).toFixed(2), u: 's', t: 'm-tp' },
     { l: 'κ_P / κ_S', v: (p.kp / p.ks).toFixed(2), u: '×', t: 'm-kpks' }, { l: 'V_P / V_S', v: p.lp.toFixed(3), u: '', t: 'm-hflf' }, { l: 'Λ_R', v: p.lR.toExponential(2), u: '', t: 'm-lr' },
     { l: 'σ_P / σ_S', v: (p.sigP / p.sigS).toFixed(2), u: '×', t: 'm-sigs' }, { l: 'RR jitter', v: p.rr_jitter_ms.toFixed(2), u: 'ms', t: 'm-jit' }, { l: 'RMSSD (filtered)', v: dm.rmssdFlt.toFixed(1), u: 'ms', t: 'm-rmssd' },
     { l: 'SDNN (filtered)', v: dm.sdnnFlt.toFixed(1), u: 'ms', t: 'm-sdnn' }, { l: 'Fit RMSE', v: dm.rmse.toFixed(2), u: 'ms', t: 'm-rmse' }, { l: 'Gated beats', v: dm.pctGated.toFixed(1), u: '%', t: 'm-gate' },
-    { l: 'Log-likelihood', v: fit.LL_star.toFixed(1), u: '', t: 'm-ll' }, { l: 'Areal velocity', v: dm.rmsArealVel.toFixed(5), u: 'Hz²/s', t: 'm-avel' }, { l: 'Mean EPR  ṡ̄', v: dm.mEPR.toFixed(4), u: 's⁻¹', t: 'm-mepr' }, { l: 'Balance σ', v: dm.abiStd.toFixed(3), u: 'nats', t: 'm-bstd' }];
+    { l: 'Log-likelihood', v: fit.LL_star.toFixed(1), u: '', t: 'm-ll' }, { l: 'Areal velocity', v: dm.rmsArealVel.toFixed(5), u: 'Hz²/s', t: 'm-avel' }, { l: 'Mean excursion index ṡ̄', v: dm.mEPR.toFixed(4), u: 's⁻¹', t: 'm-mepr' }, { l: 'Balance σ', v: dm.abiStd.toFixed(3), u: 'nats', t: 'm-bstd' }];
   $('metric-grid').innerHTML = items.map(it => `<div class="mc${it.hi ? ' hi' : ''}"><div class="mc-lbl"><span>${it.l}</span><button class="info-btn" data-tip="${it.t}" aria-label="About ${it.l}">i</button></div><div class="mc-val">${it.v}<span class="mc-unit"> ${it.u}</span></div></div>`).join('');
   const chip = (cls, k, v) => `<div class="dchip ${cls}"><span class="dk">${k}</span><span class="dv">${v}</span></div>`;
   $('dchips').innerHTML = diag ? chip(diag.ks.p > 0.05 ? 'pass' : 'fail', 'KS p-value', fmt(diag.ks.p, 4)) + chip(diag.ks.p > 0.05 ? 'pass' : 'fail', 'KS stat', fmt(diag.ks.D, 4)) +
@@ -340,7 +340,7 @@ const ready = init(); ready.catch(e => console.error(e));
    ========================================================================================================================== */
 const phaseView = ev => ev ? { source: ev.source, nStressors: ev.nStressors, segments: ev.segments.map(s => ({ name: s.name, kind: s.kind, from: s.from, to: s.to })), boundaries: ev.boundaries || [] } : null;
 root.SPARK = {
-  version: '3.11.1',
+  version: '3.11.2',
   /** Pure functions without DOM: fitModel, detectPhases, parseRRDetailed, simulateSession, ... */
   engine: E,
   settings: ST, charts: C, export: X, editor: root.SparkPhaseEditor,

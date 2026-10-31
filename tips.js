@@ -3,49 +3,49 @@
 const TIPS = {
   // ── Metric cards ──────────────────────────────────────────
   'm-hr':{
-    title:'Heart Rate (bpm)',
-    formula:'HR = ν₀ × 60',
-    body:'Intrinsic SA node pacing rate absent all autonomic tone. This is the baseline rate the sinoatrial node would maintain if both vagal and sympathetic influences were simultaneously removed — equivalent to the pharmacologically-blocked "zero-tone" rate observed in denervation studies.'
+    title:'Baseline rate ν₀ (bpm)',
+    formula:'ν₀ × 60   [ν(t) = ν₀ − x_p + x_s]',
+    body:'The baseline pacing rate of the model: the rate that remains when the two latent drives, which fluctuate around zero, are set aside. It is a model parameter (profiled out analytically). It is not the mean heart rate of the recording (see the HRV tables) and not a measurement of the intrinsic rate under pharmacological blockade.'
   },
   'm-ts':{
     title:'τ Sympathetic (s)',
     formula:'τ_S = 1 / κ_S',
-    body:'Sympathetic neurotransmitter time constant. Controls how long after a neural burst the norepinephrine-mediated drive remains elevated at the SA node. Longer τ_S (10–30 s typical) produces the slow, sustained adrenergic responses characteristic of the fight-or-flight arc.'
+    body:'E-folding time of the slow, sympathetic-like drive. Its prior is log-normal with a 95% interval of 100–300 s (default), and the estimate usually falls inside it, so it is largely set by the prior. Do not read it as an independent measurement of a sympathetic time constant, and check the Prior and posterior summary before comparing it between recordings.'
   },
   'm-tp':{
     title:'τ Parasympathetic (s)',
     formula:'τ_P = 1 / κ_P',
-    body:'Vagal acetylcholine clearance time constant. Acetylcholine is hydrolysed by AChE on the ms timescale, so τ_P ≪ τ_S physiologically (0.5–3 s). This kinetic asymmetry enables rapid beat-to-beat heart rate slowing and is the principal generator of high-frequency HRV.'
+    body:'E-folding time of the fast, vagal-like drive. Its prior is log-normal with a 95% interval of 3–6 s (default). The estimate often lies outside that interval, because the fast drive can absorb slower fluctuations such as baroreflex-related oscillations: read it as a fast time constant and not as a strictly vagal one.'
   },
   'm-kpks':{
-    title:'κ_P / κ_S — Kinetic Asymmetry',
-    formula:'κ_P / κ_S',
-    body:'Ratio of autonomic clearance rates. Values substantially > 1 confirm the expected physiological asymmetry: vagal control operates orders of magnitude faster than sympathetic. This ratio determines the frequency separation between LF (sympathetic) and HF (parasympathetic) HRV bands.'
+    title:'κ_P / κ_S — separation of the two rates',
+    formula:'κ_P / κ_S  (= τ_S / τ_P)',
+    body:'Ratio of the two clearance rates. The model imposes κ_P > κ_S and a prior on their separation (target 20 by default), so a ratio above 1 is part of the identification structure and is not a finding. Differences between recordings are informative only together with the Prior and posterior summary.'
   },
   'm-hflf':{
     title:'Λ_P = V_P / V_S (spectral anchor)',
     formula:'Λ_P = E_vagal / E_symp  [logistic CWT partition]',
-    body:'Ratio of the stationary variances of the vagal and sympathetic drives, fixed from the data before the fit: the global Morlet CWT power of heart rate between 0.04 and 0.40 Hz is split with logistic frequency weights (sympathetic below the crossover, vagal above it, with a vagal floor at low frequency, default 0.5). It is not estimated by the optimizer.'
+    body:'Ratio of the stationary variances of the vagal-like and sympathetic-like drives, fixed from the recording before the fit: the global Morlet wavelet power of heart rate (0.04–0.40 Hz) is split with logistic frequency weights (sympathetic below the crossover, 0.10 Hz by default; vagal above it, with a vagal floor at low frequency, default 0.25). It is not estimated by the optimizer. It decides how variability is shared between the two drives, so any statement about that split is conditional on this anchor.'
   },
   'm-sigs':{
-    title:'σ_P / σ_S — Drive Amplitude Ratio',
+    title:'σ_P / σ_S — amplitude ratio',
     formula:'σ_P / σ_S = √(2κ_P Λ_P σ²sys) / √(2κ_S σ²sys)',
-    body:'Ratio of absolute parasympathetic-to-sympathetic drive amplitudes. Reflects the relative excursion range of each branch around its resting level. Values > 1 mean vagal modulation is larger in amplitude; values < 1 indicate sympathetic predominance.'
+    body:'Ratio of the stationary amplitudes of the two drives. It follows from the fitted clearance rates and the spectral anchor (Λ_P), so it carries the same conditioning: read it as a description of the model\'s decomposition and not as the relative strength of the two autonomic branches.'
   },
   'm-rmssd':{
     title:'RMSSD — filtered (ms)',
     formula:'RMSSD = 1000 · √( Σ(IRR_i − IRR_{i−1})² / (N−1) )',
-    body:'Root mean square of successive differences computed on the Kalman-filtered RR series. By operating on the smoothed latent rate rather than raw beats, it isolates true autonomic variation from ectopic artifacts and measurement noise. Primary index of parasympathetic (vagal) tone.'
+    body:'RMSSD of the model-filtered RR series. The filter attenuates beat-to-beat noise and down-weights artifacts, so it is generally lower than the RMSSD of the observed series (both are in the Statistics tab). RMSSD is conventionally read as an index of vagally mediated variability, with the usual caveats.'
   },
   'm-sdnn':{
     title:'SDNN — filtered (ms)',
     formula:'SDNN = 1000 · std(IRR)',
-    body:'Standard deviation of the Kalman-filtered NN intervals. Overall HRV magnitude index spanning all frequencies — both sympathetic (LF) and parasympathetic (HF) contributions. Computed on the smoothed latent cardiac rate estimate rather than raw observed beats.'
+    body:'Standard deviation of the model-filtered RR series: overall variability over all frequencies (LF and HF). It is generally lower than the SDNN of the observed series. Compare it between recordings only with the same settings and the same recording length.'
   },
   'm-rmse':{
     title:'Fit RMSE (ms)',
     formula:'RMSE = 1000 · √( Σ(ŷ_k − y_k)² / N )',
-    body:'Root mean square error between the model-predicted and observed RR intervals. The principal measure of overall model fit quality. Values < 15 ms are typical for normal sinus rhythm with clean data; higher values may indicate complex arrhythmia, non-stationarity, or sensor artifacts.'
+    body:'Root mean square error between the filtered and the observed RR intervals. It is an in-sample fit error (the filtered RR at each beat uses states updated with that beat), not a measure of predictive accuracy. In the SPARK paper the median was about 2.5 ms; large values can come from artifacts, arrhythmia or strong non-stationarity.'
   },
   'm-gate':{
     title:'Artifact-gated beats (%)',
@@ -55,64 +55,64 @@ const TIPS = {
   'm-avel':{
     title:'Areal Velocity (Hz²/s)',
     formula:'Ω_rms = √⟨ (½(X_P Ẋ_S − X_S Ẋ_P))² ⟩_t',
-    body:'Root-mean-square instantaneous rate at which the (X_P, X_S) trajectory sweeps phase-plane area. Because it is a rate rather than a running total, its scale does not grow with recording duration or beat count, making it directly comparable across recordings of different length.'
+    body:'Root-mean-square rate at which the (x_p, x_s) trajectory sweeps area in the plane: a descriptive summary of how fast the two states rotate around each other. It does not grow with recording length. Use it to explore a recording, not to compare people.'
   },
   'm-mepr':{
-    title:'Mean EPR  ṡ̄ (s⁻¹)',
-    formula:'ṡ̄ = ⟨κ_P(X_P²/V_P^ss−1) + κ_S(X_S²/V_S^ss−1)⟩_t',
-    body:'Time-averaged stochastic entropy production rate derived from Ornstein-Uhlenbeck non-equilibrium statistical mechanics. Zero at thermodynamic equilibrium. Positive values confirm the autonomic system operates as an open dissipative system, expending continuous metabolic work to maintain ordered chronotropic rhythms against environmental perturbations.'
+    title:'Mean excursion index ṡ̄ (s⁻¹)',
+    formula:'ṡ̄ = ⟨κ_P(x_p²/V_P − 1) + κ_S(x_s²/V_S − 1)⟩_t',
+    body:'Time average of the excursion index (see its chart): how far the two states are, on average, from what their stationary variances imply. The expression comes from Ornstein–Uhlenbeck theory but is used here only as a descriptive index: it should not be read as entropy production, dissipation or an allostatic cost.'
   },
   'm-bstd':{
     title:'Balance σ (nats)',
-    formula:'σ_B = std( EMA[ ln(f(X_P)/f(X_S)) ] )',
-    body:'Standard deviation of the smoothed Autonomic Log Balance Index. Indicates the volatility or dynamic range of the autonomic balance over the recording. High values suggest a highly reactive and fluctuating autonomic equilibrium; low values suggest a rigid, highly constrained balance.'
+    formula:'σ_B = std( EMA[ ln(f(x_p)/f(x_s)) ] )',
+    body:'Standard deviation of the balance index over the recording: how much the log ratio of the two mapped states varies. It depends on the transformation used (see the balance chart) and should not be read as reactivity or rigidity of the autonomic system.'
   },
 
   // ── Chart panels ──────────────────────────────────────────
   'c-rr':{
     title:'RR Interval — Observed vs. Filtered',
     formula:'y_k ~ N(1/ν(x_k), Λ_R/ν²)',
-    body:'Observed beat-to-beat RR intervals (grey), Kalman-filtered latent rate estimate (red line) and 95% prediction interval (shaded band). Gated beats (ectopic, artifact, or rhythm change) are marked with triangles. The filter separates true autonomic variation from measurement noise and non-sinus events without hard-rejecting beats.'
+    body:'Observed beat-to-beat RR intervals (grey), model-filtered series (red line) and its 95% prediction band (shaded). Gated beats (ectopic, artifact or rhythm change) are marked with triangles: the filter down-weights them instead of rejecting them outright.'
   },
   'c-psd':{
     title:'Power Spectral Density',
     formula:'LF: 0.04–0.15 Hz  |  HF: 0.15–0.40 Hz',
-    body:'PSD of observed (grey) vs. Kalman-filtered (coloured) RR series estimated via Welch periodogram. Red shading marks the LF band (mixed sympathetic/parasympathetic); teal marks HF (primarily vagal). Close overlap of empirical and model spectra validates the spectral assumptions embedded in the Λ_P prior.'
+    body:'PSD of the observed (grey) and model-filtered (coloured) RR series, estimated with a Welch periodogram. Red shading marks the LF band (mixed sympathetic and parasympathetic influences); teal marks HF (mainly vagal). A close overlap suggests that the model reproduces the spectral content of the series; it does not by itself validate the spectral anchor.'
   },
   'c-cwt':{
     title:'Morlet CWT Time-Frequency Scalogram',
     formula:'W(s,τ) = ∫ x(t) ψ*_{s,τ}(t) dt  |  ψ(η) = π^{-¼} e^{iω₀η} e^{-η²/2}  (ω₀=6)',
-    body:'Continuous Wavelet Transform of the 4 Hz-resampled, mean-removed heart rate signal using a Morlet mother wavelet (ω₀=6). Each pixel encodes log-power in the joint time-frequency plane: bright yellow = high power, dark purple/black = low power (inferno colormap). The frequency axis is inherently log-spaced (dyadic scale grid, dj=0.25). Dashed horizontal lines mark band boundaries at 0.04 Hz (VLF/LF) and 0.15 Hz (LF/HF); 0.40 Hz marks the upper edge of the HF band. Unlike the global PSD, the scalogram reveals transient oscillatory bursts, non-stationarities, and temporal evolution of autonomic rhythms that are invisible to stationary spectral analysis — making it the primary diagnostic for time-varying sympatho-vagal dynamics.'
+    body:'Continuous Wavelet Transform of the 4 Hz-resampled, mean-removed heart rate signal using a Morlet mother wavelet (ω₀=6). Each pixel encodes log-power in the joint time-frequency plane: bright yellow = high power, dark purple/black = low power (inferno colormap). The frequency axis is inherently log-spaced (dyadic scale grid, dj=0.25). Dashed horizontal lines mark band boundaries at 0.04 Hz (VLF/LF) and 0.15 Hz (LF/HF); 0.40 Hz marks the upper edge of the HF band. Unlike the global PSD, the scalogram shows transient oscillatory bursts and the temporal evolution of rhythms; the spectral anchor uses its time average.'
   },
   'c-states':{
-    title:'Latent Autonomic Drivers',
-    formula:'dX_P = −κ_P X_P dt + σ_P dW_P',
-    body:'Kalman-smoothed estimates of the latent parasympathetic X_P (teal) and sympathetic X_S (red) drives with 95% credible intervals. Units are Hz — the instantaneous contribution each branch makes to the cardiac pacing rate. Values above zero are excitatory (increased HR); below zero are inhibitory (decreased HR).'
+    title:'Latent Autonomic Drives',
+    formula:'dx_p = −κ_P x_p dt + σ_P dW_P ;  ν(t) = ν₀ − x_p + x_s',
+    body:'Causal (filtered) estimates of the latent vagal-like x_p (teal) and sympathetic-like x_s (red) drives, in Hz, with 95% bands that are conditional on the fitted parameters (they ignore the uncertainty of those parameters). A positive x_s speeds the pacemaker and a positive x_p slows it. The states are model-based reconstructions, not recordings of nerve activity, and, being filtered, they lag sudden changes.'
   },
   'c-phase':{
-    title:'Autonomic Phase Space Topology',
-    formula:'(X_P(t), X_S(t)) ∈ ℝ²',
-    body:'Two-dimensional trajectory of the latent state vector through time. Colour encodes temporal progression from dark (early) to bright plasma (late); connecting lines highlight the sequential path. Ellipses mark the 1σ and 2σ steady-state covariance regions. Loops indicate cyclic modulation; concentrated clusters indicate autonomic quiescence. Loop area and direction reveal time-reversal asymmetry.'
+    title:'Phase Map',
+    formula:'(x_p(t), x_s(t)) ∈ ℝ²',
+    body:'Trajectory of the two latent states through time, colour-coded from early (dark) to late (bright). Ellipses mark the stationary 1σ and 2σ regions. Clusters show where the states spend their time and loops show that the two states vary together in a cyclic way; the direction and area of loops are descriptive.'
   },
   'c-abi':{
-    title:'Log Autonomic Balance Index',
-    formula:'f(x) = 0.5 + (1/π)atan(x/σ_ss); ABI(t) = EMA[ ln(f(X_P)/f(X_S)) ]',
-    body:'Each latent drive is mapped to a strictly positive (0, 1) probability-like domain while preserving its sign: baseline maps to 0.5, autonomic activation approaches 1.0, and withdrawal approaches 0.0. The natural log-ratio of these shifted states prevents division-by-zero artifacts. Finally, an Exponential Moving Average (EMA) is applied for temporal stabilization, yielding a noise-resistant index of true physiological dominance (positive = vagal, negative = sympathetic).'
+    title:'Log Balance Index (descriptive)',
+    formula:'f(x) = 0.5 + atan(x/σ_ss)/π ;  index(t) = EMA[ ln(f(x_p)/f(x_s)) ]',
+    body:'Each latent state is mapped to the interval (0, 1) and the index is the smoothed (exponential moving average) log ratio of the two mapped states; positive values mean a larger mapped x_p than x_s. It is a descriptive transformation, not a measure of autonomic dominance.'
   },
   'c-tdrive':{
-    title:'Total Autonomic Drive ‖x‖',
-    formula:'‖x(t)‖ = √( X_P(t)² + X_S(t)² )',
-    body:'Euclidean norm of the two-dimensional latent state vector. Quantifies overall autonomic activity magnitude independent of which branch dominates. High values reflect strong bidirectional modulation; low values reflect autonomic quiescence. Proportional to the instantaneous kinetic energy of the autonomic oscillator.'
+    title:'Total drive magnitude ‖x‖',
+    formula:'‖x(t)‖ = √( x_p(t)² + x_s(t)² )',
+    body:'Euclidean norm of the two states (Hz): how far the pair is from its mean level at each moment, whichever state contributes. A descriptive magnitude; it is not an energy of the autonomic system.'
   },
   'c-epr':{
-    title:'Entropy Production Rate ṡ(t)',
-    formula:'ṡ(t) = κ_P(X_P²/V_P^ss−1) + κ_S(X_S²/V_S^ss−1)',
-    body:'Instantaneous stochastic entropy production rate in s⁻¹, derived from Ornstein-Uhlenbeck non-equilibrium statistical mechanics. Zero at steady state. Red shading (ṡ > 0) marks periods of thermodynamic load where both drives exceed their typical amplitudes; teal (ṡ < 0) marks recovery phases where drives are sub-typical. Serves as the instantaneous allostatic cost signal.'
+    title:'Excursion index ṡ(t)',
+    formula:'ṡ(t) = κ_P(x_p²/V_P − 1) + κ_S(x_s²/V_S − 1)',
+    body:'Positive when the states are larger than their stationary variances imply, negative when they are smaller. The expression comes from Ornstein–Uhlenbeck theory and is shown here only as a descriptive index: it should not be read as entropy production, thermodynamic load or allostatic cost.'
   },
   'c-avel':{
     title:'Phase-Plane Areal Velocity (Smoothed)',
-    formula:'dA/dt = EMA[ 0.5 (X_P·dX_S/dt − X_S·dX_P/dt) ]',
-    body:'The smoothed instantaneous rate at which the autonomic state sweeps out area in the sympathetic-parasympathetic phase plane. An Exponential Moving Average (EMA) is applied to filter high-frequency derivative noise, revealing the true macroscopic envelope of autonomic volatility and state transitions. Being a rate rather than a running total, this metric is directly comparable across recordings of different length.'
+    formula:'dA/dt = EMA[ 0.5 (x_p·dx_s/dt − x_s·dx_p/dt) ]',
+    body:'Smoothed (exponential moving average) rate at which the state trajectory sweeps area in the (x_p, x_s) plane; positive for counter-clockwise rotation. A descriptive display of the rotation of the trajectory.'
   },
   'c-hist':{
     title:'Innovation Distribution',
@@ -127,7 +127,7 @@ const TIPS = {
   'c-pacf':{
     title:'Partial Autocorrelation — Innovations',
     formula:'Bounds: ± 1.96 / √N',
-    body:'Partial autocorrelation function of standardised innovations at lags 1–20. A well-specified model should show all bars within the 95% confidence bounds (dashed lines). Bars exceeding the bounds indicate residual temporal structure the model has not captured. A large lag-1 bar often signals that a clearance rate κ is underestimated; periodic patterns suggest mis-specified oscillator frequency.'
+    body:'Partial autocorrelation function of standardised innovations at lags 1–40. A well-specified model would show all bars within the 95% bounds (dashed lines). Bars beyond the bounds indicate residual structure that the model does not represent, for example respiratory or baroreflex oscillations; this is common in real recordings, so read the states as conditional on it.'
   },
   'c-ks':{
     title:'Time-Rescaling KS Uniformity Test',

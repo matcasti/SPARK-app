@@ -54,5 +54,12 @@
 - Prevention: every local script and the stylesheet are requested with `?v=<version>` so cached files of different versions cannot be mixed; a test checks that they match the version in app.js.
 - Tests: reproduces the exact error when the fix is reverted (an older settings file without the Live and ui sections); version-stamp consistency check.
 
+## v3.11.2: help texts and labels aligned with the SPARK manuscript
+- Tooltips (`tips.js`): baseline rate ν₀ is no longer described as the zero-tone rate after pharmacological blockade; τ_S and τ_P give the real default priors (95% intervals 100–300 s and 3–6 s) and say that τ_S is largely set by the prior and τ_P can absorb slower oscillations; κ_P/κ_S says that κ_P > κ_S is imposed; the vagal floor default is 0.25 (it said 0.5); the states are described as causal (filtered) estimates with 95% bands conditional on the fitted parameters (they said Kalman-smoothed with credible intervals); the sign convention ν(t) = ν₀ − x_p + x_s is stated; RMSSD and SDNN are marked as computed on the filtered series; the PACF text refers to lags 1–40.
+- Descriptive displays (areal velocity, balance index and its SD, total drive, excursion index) are labelled as descriptive and say what they do not represent; the entropy-production, dissipation and allostatic-cost wording is removed, because that interpretation is not supported. The card "Entropy production rate" is now "State excursion index" and "Mean EPR" is "Mean excursion index"; "Autonomic balance index" is "Log balance index"; the Overview card "Heart rate" is "Baseline rate ν₀". Card ids, exported keys (for example `mean_epr` in the session JSON) and formulas are unchanged.
+- "95% credible bands" is now "95% bands (conditional on the fitted parameters)" in the charts and in Settings; the parameter report and exports describe the two drives as vagal-like and sympathetic-like.
+- Welcome message: the priors are "informative", not "weak".
+- No change to the model, the numbers or the file formats. Version-stamped file URLs moved to 3.11.2.
+
 ## Tests (all pass)
 UI 154 checks, live stream 48, RR cleaning 8, engine vs R 56, parsing 31, phase detection 29; viewport audit 0 issues in 21 viewports (240x240 to 2560x1440). Desktop Chromium only; Safari, Firefox and physical phones not tested; the Chromium-based editor, lifecycle, performance and layout scripts were not run.
