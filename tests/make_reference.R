@@ -22,7 +22,8 @@ series <- list(
   example400 = jsonlite::fromJSON("tests/data/example400.json"),
   exercise525 = jsonlite::fromJSON("tests/data/exercise525.json"),
   stepArtifacts = sim_rr(700, 7, step = list(t0 = 250, t1 = 560, amp_p = 0.25, amp_s = 0.30), artifacts = c(120, 361, 530)),
-  restLong = sim_rr(1100, 11, Vp = 0.09, Vs = 0.03)
+  restLong = sim_rr(1100, 11, Vp = 0.09, Vs = 0.03),
+  hard1499 = jsonlite::fromJSON("tests/data/hard1499.json")      # a step series on which the former single-start fit ended in a local optimum (71 objective units above the global one)
 )
 fixed <- list(kp = 1.0, ks = 0.012, lR = 0.002)
 out <- lapply(series, function(dy) {

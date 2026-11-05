@@ -12,7 +12,7 @@ function stageAnchor(E, a) { return E.extractSpectralPriors(a.rr, a.priors); }
 function stageFit(E, a, pr) { return E.fitFromAnchor(a.rr, pr, a.control); }
 function stageRep(E, a, fit) { return a.computeSE ? E.reportModel(fit) : null; }
 /** Live reconstruction: only the spectral anchor and the MAP fit; returns what the filter needs (small message). */
-function stageLive(E, a) { const pr = E.extractSpectralPriors(a.rr, a.priors), fit = E.fitFromAnchor(a.rr, pr, a.control); return { params: fit.params, pr: pr, opt: { convergence: fit.opt.convergence, value: fit.opt.value }, LL_star: fit.LL_star }; }
+function stageLive(E, a) { const pr = E.extractSpectralPriors(a.rr, a.priors), fit = E.fitFromAnchor(a.rr, pr, a.control, false); return { params: fit.params, pr: pr, opt: { convergence: fit.opt.convergence, value: fit.opt.value }, LL_star: fit.LL_star }; }
 function stageDerived(E, a, fit) { return { dm: E.derivedMetrics(fit), diag: E.innovationDiagnostics(fit) }; }
 function stageExtras(E, a, fit, dm) {
   return { psd: E.hrPSD(fit.dy, fit.irr, fit.time), hrvObs: E.hrvStats(fit.dy, fit.pr), hrvFlt: E.hrvStats(fit.irr, fit.pr), roll: E.rollingStats(fit.time, fit.dy, fit.irr, a.roll.window, a.roll.step),
@@ -25,7 +25,7 @@ self.onmessage = function (ev) {
   try {
     if (m.kind === 'live') { post('live', { out: stageLive(E, m.args) }); return; }
     const a = m.args; post('progress', { msg: 'Extracting Morlet CWT spectral anchor…', pct: 8 }); const pr = stageAnchor(E, a);
-    post('progress', { msg: 'Running 3-D BFGS (M3)…', pct: 25 }); const fit = stageFit(E, a, pr);
+    post('progress', { msg: 'Running BFGS from three starts (M3)…', pct: 25 }); const fit = stageFit(E, a, pr);
     post('progress', { msg: a.computeSE ? 'Hessian, standard errors and Laplace posterior…' : 'Computing statistics…', pct: 62 }); const rep = stageRep(E, a, fit);
     const d = stageDerived(E, a, fit); post('done', { out: { fit: fit, rep: rep, dm: d.dm, diag: d.diag } });
     post('extras', { extras: stageExtras(E, a, fit, d.dm) });
@@ -59,7 +59,7 @@ function analyze(args, onProgress) {
   const main = () => {            // fallback: same stages on the main thread, yielding between them so that the progress text can paint
     const done = (async () => {
       onProgress && onProgress('Extracting Morlet CWT spectral anchor…', 8); await tick(); const pr = stageAnchor(E, args);
-      onProgress && onProgress('Running 3-D BFGS (M3)…', 25); await tick(); const fit = stageFit(E, args, pr);
+      onProgress && onProgress('Running BFGS from three starts (M3)…', 25); await tick(); const fit = stageFit(E, args, pr);
       onProgress && onProgress(args.computeSE ? 'Hessian, standard errors and Laplace posterior…' : 'Computing statistics…', 62); await tick(); let rep = null; try { rep = stageRep(E, args, fit); } catch (e) { console.warn('SE failed', e); }
       const d = stageDerived(E, args, fit);
       setTimeout(() => { try { resolveExtras(stageExtras(E, args, fit, d.dm)); } catch (e) { resolveExtras(null); } }, 0);       // derived spectra etc. are computed lazily by the app if needed first

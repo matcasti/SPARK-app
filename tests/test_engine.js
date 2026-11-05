@@ -28,6 +28,11 @@ for (const [name, r] of Object.entries(ref)) {
   check('fit: nu0, sigma^2, jitter', rel(p.nu0, P.nu0) < 1e-3 && rel(p.sig2, P.sig2) < 2e-3 && rel(p.rr_jitter_ms, P.rr_jitter_ms) < 2e-3);
   check('fit: MAP objective and LL*', Math.abs(fit.opt.value - r.fit.objective) < 1e-3 && Math.abs(fit.LL_star - r.fit.LL_star) < 1e-2, 'dObj ' + Math.abs(fit.opt.value - r.fit.objective).toExponential(1));
   check('fit: latent states', maxAbs(fit.Xp, r.fit.X_p) < 2e-3 && maxAbs(fit.Xs, r.fit.X_s) < 2e-3, 'max |dx_p| ' + maxAbs(fit.Xp, r.fit.X_p).toExponential(1));
+  if (name === 'hard1499') {      // a step series on which the former single start ended in a local optimum
+    const single = E.fitFromAnchor(r.dy, pr, ctl, false);
+    check('three starts reach a lower objective than the former single start (hard series)', single.opt.value - fit.opt.value > 10, 'single ' + single.opt.value.toFixed(2) + ' vs three starts ' + fit.opt.value.toFixed(2) + ' (' + fit.opt.chosen + ')');
+  }
+  check('the chosen start and the three objectives are reported', ['default', 'noise_free', 'noisy'].includes(fit.opt.chosen) && fit.opt.runs.length === 3 && Math.abs(fit.opt.value - Math.min(...fit.opt.runs)) < 0.01 + 1e-9);
   const rep = E.reportModel(fit), S = r.se;
   const sd = ['ks', 'kp', 'lR'].map(k => rel(rep.se[k], num(S[k])));
   check('standard errors (delta method) within 5%', Math.max(...sd) < 0.05, sd.map(v => (100 * v).toFixed(1) + '%').join(' '));

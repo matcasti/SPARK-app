@@ -228,7 +228,7 @@ function biwaveletMorlet(x0, dt, opts) {
   const k = new Float64Array(n), half = Math.floor(0.5 * n), k1 = 2 * Math.PI / (n * dt);
   for (let i = 1; i <= half; i++) k[i] = i * k1;
   for (let j = 0; j < Math.floor(0.5 * (n - 1)); j++) k[n - 1 - j] = -(j + 1) * k1;
-  const ff = 4 * Math.PI / (k0 + Math.sqrt(2 + k0 * k0)), coiUnit = ff / Math.SQRT2;
+  const ff = 4 * Math.PI / (k0 + Math.sqrt(2 + k0 * k0)), coiUnit = ff * Math.SQRT1_2;   // biwavelet's constant bit for bit: ff / sqrt(2) differs in the last bit, and at half-octave scales the period equals the cone edge exactly, so that bit decides which columns the mask keeps
   const power = [], scales = [], periods = [];
   const wR = new Float64Array(n), wI = new Float64Array(n);
   for (let a = 0; a <= J1; a++) {
@@ -388,8 +388,9 @@ function logPriorTerms(par, res, dy, pr) {
   return { tau_s: tS, tau_p: tP, topology: topo, lR: lRt };
 }
 /** objective_map(): negative log-posterior (1e12 when not finite). */
-function objectiveMap(theta, dy, pr, ctl) {
-  const par = thetaToPar(theta), res = runGLSFilter(dy, par.kp, par.ks, pr.energy_ratio, par.lR, ctl);
+function objectiveMap(theta, dy, pr, ctl) { return objectivePar(thetaToPar(theta), dy, pr, ctl); }
+function objectivePar(par, dy, pr, ctl) {
+  const res = runGLSFilter(dy, par.kp, par.ks, pr.energy_ratio, par.lR, ctl);
   if (!res.ok) return 1e12;
   const pen = logPriorTerms(par, res, dy, pr), val = -(res.LL_star + pen.tau_s + pen.tau_p + pen.topology + pen.lR);
   return isFinite(val) ? val : 1e12;
@@ -436,19 +437,59 @@ function bfgsR(fn, x0, maxit) {
   return { par: b, value: Fmin, counts: [funcount, gradcount], convergence: fail };
 }
 
-/** fit_model(): MAP fit from a single start. @return {params, states, ..., priors, control} */
+/** fit_model(): MAP fit from three starts in prior-whitened coordinates. @return {params, states, ..., priors, control} */
 function fitModel(dyIn, priorsIn, controlIn, onProgress) {
   const dy = Array.from(dyIn).filter(v => isFinite(v)), ctl = controlIn || sparkControl();
   const pr = extractSpectralPriors(dy, priorsIn || sparkPriors());
   if (onProgress) onProgress('Spectral anchor done (V_p/V_s = ' + pr.energy_ratio.toFixed(4) + ')', 0.2);
   return fitFromAnchor(dy, pr, ctl);
 }
-/** The optimization part of fit_model(), given the spectral prior (lets the UI show progress between stages). */
-function fitFromAnchor(dy, pr, ctl) {
-  const theta0 = [Math.log(pr.ks_mode), Math.log(Math.max(pr.kp_mode - pr.ks_mode, ctl.kp_gap_floor)), Math.log(ctl.lR_start)];
-  const opt = bfgsR(th => objectiveMap(th, dy, pr, ctl), theta0, ctl.maxit);
-  if (!isFinite(opt.value)) throw new Error('Optimization failed.');
-  return assembleFit(dy, pr, ctl, thetaToPar(opt.par), opt);
+
+/** .whitened_map(): prior-whitened coordinates z of the optimizer (optimizer geometry only; the objective is unchanged).
+    z1 = (ln tau_p - mu_p) / sd_p; z2 = (ln d - ln d0) / sd_d with d = ln(tau_s / tau_p) = ln(kp / ks) > 0; z3 = ln lR.
+    d0 = mu_s - mu_p, sd_d = sqrt(sd_p^2 + sd_s^2) / d0 (d0 = 1, sd_d = 1 when d0 <= 0). */
+function whitenedMap(pr) {
+  const muP = pr.log_tau_p_mu, sdP = pr.sigma_log_tau_p, muS = pr.log_tau_s_mu, sdS = pr.sigma_log_tau_s;
+  let d0 = muS - muP, sdD = Math.sqrt(sdP * sdP + sdS * sdS) / d0;
+  if (!isFinite(d0) || d0 <= 0 || !isFinite(sdD)) { d0 = 1; sdD = 1; }
+  return {
+    to: z => { const ltp = muP + sdP * z[0], d = Math.exp(Math.log(d0) + sdD * z[1]); return { ks: Math.exp(-(ltp + d)), kp: Math.exp(-ltp), lR: Math.exp(z[2]) }; },
+    from: p => [(-Math.log(p.kp) - muP) / sdP, (Math.log(Math.log(p.kp / p.ks)) - Math.log(d0)) / sdD, Math.log(p.lR)]
+  };
+}
+/** .m3_starts(): the three starting points (physical ks, kp, lR) of the M3 optimization. */
+function m3Starts(pr, ctl) {
+  return [
+    { name: 'default', ks: pr.ks_mode, kp: pr.ks_mode + Math.max(pr.kp_mode - pr.ks_mode, ctl.kp_gap_floor), lR: ctl.lR_start },   // centers of the time-scale priors
+    { name: 'noise_free', ks: 1 / 160, kp: 1 / 12, lR: 1e-6 },                                                                      // tau_p 12 s, tau_s 160 s, negligible observation noise
+    { name: 'noisy', ks: 1 / 150, kp: 1 / 25, lR: 0.3 }                                                                             // tau_p 25 s, tau_s 150 s, dominant observation noise
+  ];
+}
+/** .optimize_m3(): BFGS (R's vmmin) in the whitened coordinates from each start; keeps the lowest value, and among values within 0.01 of it
+    the earliest start (runs that reach the same optimum differ by the optimizer tolerance). Runs that fail or return 1e11 or more are discarded.
+    @return {par, value, opt (the chosen run), runs (values), chosen (start name)} or null. */
+function optimizeM3(objective, pr, ctl, starts) {
+  const W = whitenedMap(pr), list = starts || m3Starts(pr, ctl), fz = z => objective(W.to(z));
+  const fits = list.map(st => { try { return bfgsR(fz, W.from(st), ctl.maxit); } catch (e) { return null; } });
+  const values = fits.map(o => (o && isFinite(o.value) && o.value < 1e11) ? o.value : Infinity), best = Math.min(...values);
+  if (!isFinite(best)) return null;
+  const k = values.findIndex(v => v <= best + 0.01);
+  return { par: W.to(fits[k].par), value: values[k], opt: fits[k], runs: values, chosen: list[k].name };
+}
+
+/** The optimization part of fit_model(), given the spectral prior (lets the UI show progress between stages).
+    `multiStart` = false is the former single BFGS run from the centers of the priors in the log-rate coordinates; the Live view keeps it,
+    because it refits repeatedly while recording. */
+function fitFromAnchor(dy, pr, ctl, multiStart) {
+  if (multiStart === false) {
+    const theta0 = [Math.log(pr.ks_mode), Math.log(Math.max(pr.kp_mode - pr.ks_mode, ctl.kp_gap_floor)), Math.log(ctl.lR_start)];
+    const opt = bfgsR(th => objectiveMap(th, dy, pr, ctl), theta0, ctl.maxit);
+    if (!isFinite(opt.value)) throw new Error('Optimization failed.');
+    return assembleFit(dy, pr, ctl, thetaToPar(opt.par), opt);
+  }
+  const best = optimizeM3(par => objectivePar(par, dy, pr, ctl), pr, ctl);
+  if (!best) throw new Error('Optimization failed.');
+  return assembleFit(dy, pr, ctl, best.par, Object.assign({}, best.opt, { value: best.value, runs: best.runs, chosen: best.chosen }));
 }
 
 /** Scalogram data for display: log power (Float32 rows, highest frequency first) of the 0.01-0.5 Hz band, with its time span and range. */
@@ -946,7 +987,7 @@ function parseRRDetailed(text, opts) {
 function parseRR(txt, opts) { const r = parseRRDetailed(txt, opts); return r.error ? null : r; }
 
 const API = { fftCore, pow2, mean, median, sd, pnorm, qnorm, makeSpline, monoSpline, DEFAULT_PRIORS, R_ENGINE_PRIOR_DEFAULTS, DEFAULT_CONTROL, sparkPriors, sparkControl, biwaveletMorlet, hrGrid,
-  DEFAULT_CLEAN, cleanOptions, cleanSample, runmed, extractSpectralPriors, ouBlock, artifactGate, runGLSFilter, thetaToPar, parToTheta, logPriorTerms, objectiveMap, bfgsR, fitModel, fitFromAnchor, assembleFit, runManualFit,
+  DEFAULT_CLEAN, cleanOptions, cleanSample, runmed, extractSpectralPriors, ouBlock, artifactGate, runGLSFilter, thetaToPar, parToTheta, logPriorTerms, objectiveMap, objectivePar, bfgsR, whitenedMap, m3Starts, optimizeM3, fitModel, fitFromAnchor, assembleFit, runManualFit,
   numHessian, eigenSym, pinv, reportModel, pacf, acf, ksUniform, innovationDiagnostics, derivedMetrics, hrvStats, rollingStats, crossCorr, stateLandscape, computePSD, hrPSD, cwtDisplay, simulateSession, genExampleSession, genExampleMulti, genExampleRR, genLegacyExampleRR, detectPhases, phasesFromMarkers, phasesFromWindows, paintWindow, phaseSummary, phaseHRV, parseRR, parseRRDetailed, guessUnit, UNIT_FACTOR, UNIT_NAME };
 root.SparkEngine = API;
 return API;

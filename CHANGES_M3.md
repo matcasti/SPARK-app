@@ -61,5 +61,14 @@
 - Welcome message: the priors are "informative", not "weak".
 - No change to the model, the numbers or the file formats. Version-stamped file URLs moved to 3.11.2.
 
+## v3.12.0: the retrospective fit uses three starts (as the R engine)
+- The single BFGS start could end in a worse local optimum (in the SPARK project, 12 of 313 recordings; the objective was 10 to 470 units above the best one found, and seven of those fits had τ_P < 0.15 s). The retrospective fit now runs R's BFGS from three starting points, in coordinates scaled by the spread of the time-scale priors, and keeps the lowest objective: the default start (centers of the priors, Λ_R = 1e-3), a noise-free start (τ_P 12 s, τ_S 160 s, Λ_R = 1e-6) and a noisy start (τ_P 25 s, τ_S 150 s, Λ_R = 0.3). Among runs within 0.01 of the lowest, the earliest start is kept. The objective function is unchanged. It is the same procedure as in `model_engine.R` (`fit_model`), so the app and the R engine reach the same optimum.
+- The Live view keeps its single start and the former coordinates (it refits repeatedly while recording), so a Live estimate on a hard recording can still differ from the retrospective one.
+- Fits take about 2.6 times longer (three runs).
+- The session export (JSON) adds `start_chosen` and `start_objectives`.
+- Spectral anchor: `biwaveletMorlet` now uses biwavelet's cone-of-influence constant bit for bit (`fourier.factor * sqrt(1/2)`; the former `fourier.factor / sqrt(2)` differs in the last bit). At half-octave scales the period equals the cone edge exactly in two columns, and that bit decided whether the mask kept them, which made the JS anchor differ from R's by up to 8e-5 (relative). It now agrees to better than 1e-9 (38 recordings of the SPARK project: 7e-10), and the fitted κ and Λ_R to 5e-6.
+- Tests: `tests/test_engine.js` has a fifth series (`tests/data/hard1499.json`, a step series on which the single start ended 71 objective units above the best optimum); the references in `tests/reference_R.json` were regenerated with the new R engine. All 76 checks pass (14 of them, on the spectral anchor, failed before the cone-constant fix).
+- Exported R scripts call `fit_model`: they need the `model_engine.R` of the SPARK project that contains the three-start fit (the older file gives the single-start result).
+
 ## Tests (all pass)
 UI 154 checks, live stream 48, RR cleaning 8, engine vs R 56, parsing 31, phase detection 29; viewport audit 0 issues in 21 viewports (240x240 to 2560x1440). Desktop Chromium only; Safari, Firefox and physical phones not tested; the Chromium-based editor, lifecycle, performance and layout scripts were not run.

@@ -87,7 +87,7 @@ const TIPS = {
   'c-states':{
     title:'Latent Autonomic Drives',
     formula:'dx_p = −κ_P x_p dt + σ_P dW_P ;  ν(t) = ν₀ − x_p + x_s',
-    body:'Causal (filtered) estimates of the latent vagal-like x_p (teal) and sympathetic-like x_s (red) drives, in Hz, with 95% bands that are conditional on the fitted parameters (they ignore the uncertainty of those parameters). A positive x_s speeds the pacemaker and a positive x_p slows it. The states are model-based reconstructions, not recordings of nerve activity, and, being filtered, they lag sudden changes.'
+    body:'Forward-filtered estimates (conditional on parameters fitted to the whole recording) of the latent vagal-like x_p (teal) and sympathetic-like x_s (red) drives, in Hz, with 95% bands that are conditional on the fitted parameters (they ignore the uncertainty of those parameters). A positive x_s speeds the pacemaker and a positive x_p slows it. The states are model-based reconstructions, not recordings of nerve activity, and, being filtered, they lag sudden changes.'
   },
   'c-phase':{
     title:'Phase Map',
