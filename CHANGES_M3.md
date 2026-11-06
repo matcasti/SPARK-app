@@ -1,5 +1,12 @@
 # SPARK app: change log (M3 engine and later)
 
+## v3.13.0: quantities that are comparable across people and times
+- RR intervals alone do not identify the tonic level of either branch (ν₀, μ_P and μ_S enter the likelihood only through ν₀ − μ_P + μ_S). The parameter table, the CSV/JSON exports and the report now list what is identified, in physical units: **HR** (mean heart rate from the RR intervals, bpm), **SD_S** = √σ²sys and **SD_P** = √(Λ_P σ²sys) (stationary SD of each drive, Hz; × 60 = bpm equivalent; their ratio is the spectral anchor). The time constants were already listed.
+- Optional **age** (Settings → Data → Person; 0 = not given; adults 18-100): adds the **Net tone** row, mean rate minus the intrinsic rate of the age formula (118.1 − 0.57 × age, Jose and Collison 1970), bpm; negative means vagal dominance. It is labelled as an assumption: a population mean with an error of the order of 8 bpm per person, not a measurement of either branch.
+- engine.js: `comparableIndices(fit, age)`, `intrinsicRateBpm(age)`, `INTRINSIC_RATE`; same definitions as `comparable_indices()` of the R project. The parameter table has 16 rows (17 with an age); the session JSON `parameters` array has the same rows.
+- No change to the model, the fits or the numbers already reported.
+- Tests: `tests/test_comparable.js` (16 checks) compares the JS engine with the R function on the five reference series (expected values in `tests/expected_comparable_R.json`); `tests/test_ui.js` checks the new rows, the age row and the adult range (needs jsdom; run it after `npm i`).
+
 ## Model: the app now runs M3 (no vagal variance gate)
 - engine.js: M3 (3 parameters: ln kappa_S, ln(kappa_P - kappa_S), ln Lambda_R); no gate gain, second pass, gamma prior or gate fields. Port of model_engine.R (the M3 engine of the SPARK project). Default vagal floor 0.25 (the engine default). The artifact multiplier is unchanged.
 - Interface: removed the gamma slider of the manual panel, the "vagal gate" pill and metric tile, the gate gain chart, the gamma prior chart and table row, the gate settings group, gamma start value and the gate preset; the correlation matrix is 3 x 3; tab "Gate & Model" is "Model"; added a Lambda_R tile.

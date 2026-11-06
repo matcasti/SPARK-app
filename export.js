@@ -27,6 +27,7 @@ function csv(headers, rows) {
 /* ---- parameter table rows (also used to render the table in the app) ---------------------------------------------------- */
 function paramRows(fit, rep) {
   const p = fit.params, pr = fit.pr, ctl = fit.ctl, se = rep ? rep.se : {}, g = (est, s) => ({ est, se: s, lo: isFinite(s) ? est - 1.96 * s : NaN, hi: isFinite(s) ? est + 1.96 * s : NaN });
+  const age = (ST && ST.get('analysis.age')) || 0, ci = E.comparableIndices(fit, age);
   const row = (n, group, gc, interp, status, est, s) => Object.assign({ n, group, gc, interp, status }, g(est, s == null ? NaN : s));
   return [
     row('ν₀', 'Baseline', 'g-base', 'Baseline pacing rate of the model (Hz); ν(t) = ν₀ − x_p + x_s', 'Profiled — GLS', p.nu0),
@@ -41,8 +42,11 @@ function paramRows(fit, rep) {
     row('Λ_R', 'Ratio', 'g-rat', 'Noise-to-signal ratio from threshold-crossing jitter', 'Estimated — MAP', p.lR, se.lR),
     row('Jitter', 'Ratio', 'g-rat', 'Equivalent RR timing jitter SD at the median RR (ms)', 'Derived — MAP', p.rr_jitter_ms),
     row('θ_jump', 'Robustness', 'g-rob', 'Relative RR jump threshold of the artifact gate', 'Fixed — setting', ctl.jump_threshold),
-    row('p_jump', 'Robustness', 'g-rob', 'Steepness of the artifact gate', 'Fixed — setting', ctl.jump_power)
-  ];
+    row('p_jump', 'Robustness', 'g-rob', 'Steepness of the artifact gate', 'Fixed — setting', ctl.jump_power),
+    row('HR', 'Comparable', 'g-cmp', 'Mean heart rate from the RR intervals (bpm)', 'Derived — data', ci.hr_bpm),
+    row('SD_S', 'Comparable', 'g-cmp', 'Stationary SD of the sympathetic-like drive, √σ²sys (Hz; × 60 = bpm equivalent)', 'Derived — GLS', ci.sdS_hz),
+    row('SD_P', 'Comparable', 'g-cmp', 'Stationary SD of the vagal-like drive, √(Λ_P σ²sys) (Hz; × 60 = bpm equivalent); the ratio SD_P/SD_S is the spectral anchor', 'Derived — spectral', ci.sdP_hz)
+  ].concat(Number.isFinite(ci.net_tone_bpm) ? [row('Net tone', 'Comparable', 'g-cmp', `Mean rate minus the intrinsic rate of the age formula (${nfix(ci.intrinsic_bpm, 1)} bpm at ${age} y), bpm; negative: vagal dominance. Population formula, error about ±${ci.net_tone_band_bpm} bpm; not a measure of either branch`, 'Assumption — age formula', ci.net_tone_bpm)] : []);
 }
 
 /* ---- images ------------------------------------------------------------------------------------------------------------------- */

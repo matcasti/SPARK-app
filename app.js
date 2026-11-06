@@ -340,7 +340,7 @@ const ready = init(); ready.catch(e => console.error(e));
    ========================================================================================================================== */
 const phaseView = ev => ev ? { source: ev.source, nStressors: ev.nStressors, segments: ev.segments.map(s => ({ name: s.name, kind: s.kind, from: s.from, to: s.to })), boundaries: ev.boundaries || [] } : null;
 root.SPARK = {
-  version: '3.12.0',
+  version: '3.13.0',
   /** Pure functions without DOM: fitModel, detectPhases, parseRRDetailed, simulateSession, ... */
   engine: E,
   settings: ST, charts: C, export: X, editor: root.SparkPhaseEditor,

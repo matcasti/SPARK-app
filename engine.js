@@ -603,6 +603,20 @@ function innovationDiagnostics(fit) {
            skew: z.reduce((s, v) => s + v ** 3, 0) / N, kurt: z.reduce((s, v) => s + v ** 4, 0) / N - 3 };
 }
 
+/* ---- quantities that are comparable across people and times -------------------------------------------------------------------
+   nu0, mu_p and mu_s enter the likelihood only through nu0 - mu_p + mu_s, so RR intervals alone do not identify the tonic level of either branch.
+   What is identified, in physical units: the stationary SD of each drive, the time constants and the mean rate. The net tone (sympathetic minus vagal)
+   needs an external anchor, the intrinsic heart rate, here the age formula of Jose and Collison (1970) for adults: a population mean with an individual
+   error of the order of band_bpm, NOT a measurement of either branch. Same definitions as comparable_indices() of the R project. */
+const INTRINSIC_RATE = { intercept_bpm: 118.1, slope_bpm_per_year: 0.57, band_bpm: 8, age_min: 18, age_max: 100 };
+function intrinsicRateBpm(age) { return Number.isFinite(age) && age >= INTRINSIC_RATE.age_min && age <= INTRINSIC_RATE.age_max ? INTRINSIC_RATE.intercept_bpm - INTRINSIC_RATE.slope_bpm_per_year * age : NaN; }
+/** Mean rate (bpm, from the RR intervals), stationary SDs of the drives (Hz and bpm equivalents), time constants (s) and, with an age, the intrinsic rate and the net tone (bpm; negative: vagal dominance). */
+function comparableIndices(fit, age) {
+  const p = fit.params, dy = fit.dy, hr = 60 / mean(Array.from(dy)), sdP = Math.sqrt(p.lp * p.sig2), sdS = Math.sqrt(p.sig2), ihr = intrinsicRateBpm(age);
+  return { hr_bpm: hr, sdP_hz: sdP, sdS_hz: sdS, sdP_bpm: 60 * sdP, sdS_bpm: 60 * sdS, tauP: 1 / p.kp, tauS: 1 / p.ks,
+           intrinsic_bpm: ihr, net_tone_bpm: Number.isFinite(ihr) ? hr - ihr : NaN, net_tone_band_bpm: Number.isFinite(ihr) ? INTRINSIC_RATE.band_bpm : NaN };
+}
+
 /* ---- derived metrics, HRV comparators and extra statistics ------------------------------------------------ */
 function derivedMetrics(fit) {
   const { Xp, Xs, irr, dy, gate, params } = fit, N = irr.length;
@@ -988,7 +1002,7 @@ function parseRR(txt, opts) { const r = parseRRDetailed(txt, opts); return r.err
 
 const API = { fftCore, pow2, mean, median, sd, pnorm, qnorm, makeSpline, monoSpline, DEFAULT_PRIORS, R_ENGINE_PRIOR_DEFAULTS, DEFAULT_CONTROL, sparkPriors, sparkControl, biwaveletMorlet, hrGrid,
   DEFAULT_CLEAN, cleanOptions, cleanSample, runmed, extractSpectralPriors, ouBlock, artifactGate, runGLSFilter, thetaToPar, parToTheta, logPriorTerms, objectiveMap, objectivePar, bfgsR, whitenedMap, m3Starts, optimizeM3, fitModel, fitFromAnchor, assembleFit, runManualFit,
-  numHessian, eigenSym, pinv, reportModel, pacf, acf, ksUniform, innovationDiagnostics, derivedMetrics, hrvStats, rollingStats, crossCorr, stateLandscape, computePSD, hrPSD, cwtDisplay, simulateSession, genExampleSession, genExampleMulti, genExampleRR, genLegacyExampleRR, detectPhases, phasesFromMarkers, phasesFromWindows, paintWindow, phaseSummary, phaseHRV, parseRR, parseRRDetailed, guessUnit, UNIT_FACTOR, UNIT_NAME };
+  numHessian, eigenSym, pinv, reportModel, pacf, acf, ksUniform, innovationDiagnostics, derivedMetrics, comparableIndices, intrinsicRateBpm, INTRINSIC_RATE, hrvStats, rollingStats, crossCorr, stateLandscape, computePSD, hrPSD, cwtDisplay, simulateSession, genExampleSession, genExampleMulti, genExampleRR, genLegacyExampleRR, detectPhases, phasesFromMarkers, phasesFromWindows, paintWindow, phaseSummary, phaseHRV, parseRR, parseRRDetailed, guessUnit, UNIT_FACTOR, UNIT_NAME };
 root.SparkEngine = API;
 return API;
 }

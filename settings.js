@@ -12,7 +12,7 @@ const DEFAULTS = {
   appearance: { theme: 'auto', accent: 'blue', density: 'comfortable', fontScale: 1, reduceMotion: false },
   charts: { colorP: '', colorS: '', lineWidth: 1.6, showCI: true, showGrid: true, maxPoints: 3000, palette: 'inferno', hidden: {} },
   model: { priors: JSON.parse(JSON.stringify(E.DEFAULT_PRIORS)), control: JSON.parse(JSON.stringify(E.DEFAULT_CONTROL)) },
-  analysis: { timeUnit: 'auto', autoRun: false, cleanRR: false, cleanWindow: 50, cleanNMad: 3.5, cleanNIter: 2, computeSE: true, phaseMode: 'auto', phaseMarkers: '', phaseSensitivity: 'standard', phaseMinShift: 10, phaseMinZ: 4, phaseMinSegment: 30, phaseMaxStressors: 4, rollWindow: 60, rollStep: 10, landscapeGrid: 80, landscapeBandwidth: 1, showFlow: true, showBasins: true, minBasin: 0.3 },
+  analysis: { timeUnit: 'auto', age: 0, autoRun: false, cleanRR: false, cleanWindow: 50, cleanNMad: 3.5, cleanNIter: 2, computeSE: true, phaseMode: 'auto', phaseMarkers: '', phaseSensitivity: 'standard', phaseMinShift: 10, phaseMinZ: 4, phaseMinSegment: 30, phaseMaxStressors: 4, rollWindow: 60, rollStep: 10, landscapeGrid: 80, landscapeBandwidth: 1, showFlow: true, showBasins: true, minBasin: 0.3 },
   export: { scale: 2, background: 'theme', prefix: 'spark', decimal: '.', separator: ',', includeSettings: true }
 };
 const ACCENTS = { blue: ['#5B9CFF', '#2563EB'], teal: ['#2DD4D4', '#0E9AA7'], violet: ['#A78BFA', '#6D4FD1'], amber: ['#F5B84B', '#C98A12'], green: ['#3DDC97', '#169C62'] };
@@ -132,6 +132,8 @@ const SCHEMA = [
       { path: 'analysis.cleanWindow', label: 'Window (beats)', type: 'number', min: 3, step: 2, hint: 'Default 50. An even value is raised to the next odd one; it never exceeds the length of the series.' },
       { path: 'analysis.cleanNMad', label: 'MAD multiplier (n × MAD)', type: 'number', min: 0.5, step: 0.5, hint: 'Default 3.5. Smaller values replace more beats (2 changes about 4-7% of artifact-free beats).' },
       { path: 'analysis.cleanNIter', label: 'Passes', type: 'number', min: 1, max: 20, step: 1, hint: 'Default 2.' }] },
+    { title: 'Person (optional)', rows: [
+      { path: 'analysis.age', label: 'Age (years, adults 18-100; 0 = not given)', type: 'number', min: 0, max: 100, step: 1, hint: 'Adds the net tone to the parameter table and the exports: mean heart rate minus the intrinsic heart rate of the age formula (118.1 − 0.57 × age; Jose and Collison, 1970). It is a population mean with an individual error of the order of 8 bpm and it is not a measurement of either branch: RR intervals alone do not identify the tonic level of the vagal or the sympathetic drive.' }] },
     { title: 'Running', rows: [
       { path: 'analysis.autoRun', label: 'Run automatically after loading', type: 'checkbox' }] }] },
 
